@@ -228,6 +228,21 @@ test('classifyEvaluationReportView separates passed, failed, degraded, and uncon
   assert.equal(failedRes.kind, 'failed');
   assert.equal(failedRes.rowCount, 2);
 
+  const failedView = { badges: ['问答评估未通过'], text: '问答效果评估' };
+  for (const verdict of ['—', '已覆盖', '未覆盖']) {
+    assert.throws(
+      () => classifyEvaluationReportView({ ...failedView, rows: [{ question: 'Q1', verdict }] }),
+      /逐题评估表/
+    );
+  }
+  assert.equal(
+    classifyEvaluationReportView({
+      ...failedView,
+      rows: [{ question: 'Q1', verdict: '待改进', attribution: '输入源资料缺失' }],
+    }).kind,
+    'failed'
+  );
+
   // Unconfigured / disabled clean state
   const unconf = classifyEvaluationReportView({
     badges: ['双轮评测已关闭'],
