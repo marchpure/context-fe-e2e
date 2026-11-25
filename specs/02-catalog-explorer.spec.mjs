@@ -32,6 +32,42 @@ export async function run(t, page, cfg) {
     return '未发现 1970-01-01 零值时间';
   });
 
+  if (cfg.workspaceId === '800e2e0a-bb05-4591-8cd2-f8df54be0ebe') {
+    await t.check('已入库的内置文档与 PostgreSQL 表在资产单元汇总显示正确数量', async () => {
+      const searchSelector = 'input[placeholder="搜索资产单元名称或工具"]';
+      const ready = await page.waitFor(
+        `Boolean(document.querySelector(${JSON.stringify(searchSelector)}))`,
+        { timeoutMs: 18000 }
+      );
+      if (!ready.ok) throw new Error('资产单元汇总未加载');
+
+      for (const [name, expected] of [
+        ['codex-e2e-local-kb-1125', '2 篇文档'],
+        ['codex-e2e-pg-1125', '2 张表'],
+      ]) {
+        await page.evalJSON(`(() => {
+          const input = document.querySelector(${JSON.stringify(searchSelector)});
+          Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(
+            input, ${JSON.stringify(name)}
+          );
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        const settled = await page.waitFor(`(() => {
+          const row = [...document.querySelectorAll('tr')].find(tr =>
+            [...tr.querySelectorAll('button')].some(button =>
+              button.textContent.trim() === ${JSON.stringify(name)}
+            )
+          );
+          return row?.querySelectorAll('td')[2]?.textContent.trim() || false;
+        })()`, { timeoutMs: 12000 });
+        if (settled.value !== expected) {
+          throw new Error(`${name} 应显示「${expected}」，实际「${settled.value || '缺少汇总行'}」`);
+        }
+      }
+      return '两篇已导入文档和两张已接入表均按实际资产数量显示';
+    });
+  }
+
   await t.checkKnownBug(
     'CTX-020',
     '添加资产向导不暴露数据面已下线在线能力的 Meego / 风神死入口',
