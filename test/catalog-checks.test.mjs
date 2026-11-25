@@ -245,7 +245,7 @@ test('资产详情页防假绿：标题为「—」或 pending 占位时绝不�
     headerTitle: '飞书受控文档',
     assetTypeTag: '文件集合',
     aclDeniedAlert:
-      '当前身份暂无权限预览该资产原文。若来源已开启远端权限控制，请确认当前账号具备原文档协作者权限并已完成个人账号授权。',
+      '当前身份无权读取此来源的内容。若来源已开启远端权限控制，请确认当前账号具备原文档协作者权限并已完成个人账号授权。',
     markdownText: '',
     snippetCount: 0,
   });
@@ -261,7 +261,7 @@ test('资产详情页防假绿：标题为「—」或 pending 占位时绝不�
     pendingApiCount: 0,
     headerTitle: '飞书受控文档',
     assetTypeTag: '文件集合',
-    aclDeniedAlert: '当前身份暂无权限预览该资产原文。',
+    aclDeniedAlert: '当前身份无权读取此来源的内容。',
     snippetCount: 1,
   });
   assert.equal(leaked.settled, true);
