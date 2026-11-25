@@ -78,16 +78,18 @@ test('USE-03/07 冻结引文不能串版本、串正文或回到另一个会话'
     seed: 0x112507, runs: 160, file: 'test/seal-regressions.property.test.mjs',
     generate: rng => ({
       version: rng.int(1, 2), sessionId: rng.slug('wbs'),
-      fault: rng.pick(['none', 'body', 'citation', 'session', 'release', 'workspace', 'answer', 'mixed-answer', 'mixed-return']),
+      fault: rng.pick(['none', 'body', 'citation', 'session', 'release', 'workspace', 'answer', 'mixed-answer', 'mixed-return', 'message', 'missing-message', 'changed-answer']),
     }),
   }, ({ version, sessionId, fault }) => {
     const days = version === 1 ? 7 : 15;
     const other = version === 1 ? 15 : 7;
     const pin = { entryId: 'r-entry', domainId: 'dom-demo', releaseId: 'rel-' + version, sessionId, version, days };
-    const chat = href('/context/workbench', { tab: 'chat', sessionId });
+    const chat = href('/context/workbench', { tab: 'chat', sessionId, resumeMessage: 'turn-original' });
+    if (fault === 'missing-message') chat.searchParams.delete('resumeMessage');
     const url = href('/context/catalog/r-entry/detail', { domainId: pin.domainId, releaseId: pin.releaseId, returnTo: chat.href });
     const back = new URL(chat);
     if (fault === 'session') back.searchParams.set('sessionId', 'wbs-other');
+    if (fault === 'message') back.searchParams.set('resumeMessage', 'turn-other');
     if (fault === 'release') url.searchParams.set('releaseId', 'rel-other');
     if (fault === 'workspace') url.searchParams.delete('workspaceId');
     const observation = {
@@ -96,7 +98,8 @@ test('USE-03/07 冻结引文不能串版本、串正文或回到另一个会话'
       source: '退款时效 v' + (fault === 'citation' ? 3 - version : version),
       detail: '原文退款时效为 ' + (fault === 'body' ? other : days) + ' 天',
       href: url.href, returned: { href: back.href, answer: '退款时效为 ' + days + ' 天' +
-        (fault === 'mixed-return' ? ` 或 ${other} 天` : '') },
+        (fault === 'mixed-return' ? ` 或 ${other} 天` : '') +
+        (fault === 'changed-answer' ? '，采用另一种口径' : '') },
     };
     const check = () => assertPinnedCitation(observation, cfg, pin);
     if (fault === 'none') assert.doesNotThrow(check);

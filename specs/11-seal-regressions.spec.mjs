@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { dispatchRealMouseClick, waitForAssetDetailSettled } from '../lib/catalog-checks.mjs';
+import { dispatchRealMouseClick } from '../lib/catalog-checks.mjs';
 import {
   assertFrozenRowsUnchanged,
   assertMergedReview,
@@ -140,25 +140,31 @@ export async function run(t, page, cfg) {
     const title = 'USE-03/07 ' + key.toUpperCase() + ' 引文打开冻结详情并回到原会话';
     const data = fixtures.citations;
     const pin = data?.[key];
-    if (!need(title, data?.title && [data.entryId, data.domainId, pin?.sessionId, pin?.releaseId].every(v => ids.test(v || '')))) continue;
+    if (!need(title, data && [data.entryId, data.domainId, pin?.sessionId, pin?.releaseId].every(v => ids.test(v || '')))) continue;
     await t.check(title, async () => {
       const chat = '/context/workbench?tab=chat&sessionId=' + pin.sessionId;
-      const answerState = textIn('.context-workbench-chatkit', ['参考来源', data.title]);
+      const cardSelector = '.context-workbench-chatkit li[data-context-entry-id="' + data.entryId + '"]';
+      const messageExpr = 'document.querySelector(' + q(cardSelector) + ')?.closest(' + q('[data-role="assistant"]') + ')';
+      const answerState = '(() => { const message = ' + messageExpr + '; return ' +
+        '[...(message?.querySelectorAll(".chatkit-assistant-message-content .chatkit-md") || [])]' +
+        '.map(el => el.innerText.trim()).filter(Boolean).join("\\n") || false; })()';
       await open(page, chat, '11-citation-session-' + key);
-      const answer = await wait(page, answerState, '会话答案与引用');
-      const source = await wait(page, '(() => [...document.querySelectorAll(".context-workbench-chatkit li")]' +
-        '.find(el => el.querySelector("button")?.textContent.trim() === ' + q(data.title) +
-        ' && el.innerText.includes("v' + version + '"))?.innerText)()', '冻结引文卡片');
-      await click(page, data.title, { within: '.context-workbench-chatkit' });
-      await wait(page, textIn('body', ['打开详情']), '引文图谱');
+      const answer = await wait(page, answerState, '同一消息中的真实回答');
+      const source = await wait(page, 'document.querySelector(' + q(cardSelector) + ')?.innerText', '冻结引文卡片');
+      await dispatchRealMouseClick(page, '(() => [...((' + messageExpr + ')?.querySelectorAll("button") || [])]' +
+        '.find(button => button.innerText.trim() === "查看图谱"))()', '同一回答的查看图谱');
+      const graph = '[aria-label="检索图谱"]';
+      const node = graph + ' button[data-context-entry-id="' + data.entryId + '"]';
+      await wait(page, 'document.querySelector(' + q(node) + ')?.getClientRects().length', '冻结引文图谱节点');
+      await dispatchRealMouseClick(page, 'document.querySelector(' + q(node) + ')', '目标引文图谱节点');
       page.setStep('11-citation-detail-' + key);
-      await click(page, '打开详情');
-      const settled = await waitForAssetDetailSettled(page, { timeoutMs: 15000 });
-      if (!settled.ok || settled.verdict.status !== 'READY_CONTENT') throw new Error('引文详情未显示实际原文');
+      await click(page, '打开详情', { within: graph });
+      const detail = await wait(page,
+        'document.querySelector(' + q('article[aria-label="发布版本资产详情"] section[aria-label="发布版本原文"]') + ')?.innerText.trim()',
+        '可读的冻结原文');
       const before = await oracle(page, cfg, '11-citation-detail-' + key, ['GetContextEntry']);
-      const detail = settled.snapshot.markdownText || settled.snapshot.snippetSample;
       page.setStep('11-citation-return-' + key);
-      await click(page, '返回', { match: 'prefix', selector: 'button[title], button[aria-label], button, a' });
+      await click(page, '返回资源列表', { within: 'article[aria-label="发布版本资产详情"]' });
       const returned = await wait(page, answerState, '原会话恢复');
       const back = await oracle(page, cfg, '11-citation-return-' + key);
       assertPinnedCitation({ answer, source, href: before.href, detail,
