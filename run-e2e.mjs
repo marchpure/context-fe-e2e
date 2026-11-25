@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IsolatedCdpPage, DEFAULT_CONFIG } from './lib/cdpSession.mjs';
+import { assertFrontendBuild, IsolatedCdpPage, DEFAULT_CONFIG } from './lib/cdpSession.mjs';
 import { gateExitCode, TestContext } from './lib/testContext.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -45,6 +45,25 @@ async function main() {
         : error?.message || '隔离浏览器启动失败');
       allResults.push(...startup.results);
     }
+    if (allResults.length === 0 && DEFAULT_CONFIG.expectedFrontendVersion) {
+      const startup = new TestContext(page, 'bootstrap');
+      const step = '00-frontend-build';
+      try {
+        await page.send('Network.setCacheDisabled', { cacheDisabled: true });
+        const entry = await page.gotoContext('/context/catalog', { stepName: step });
+        const oracle = await page.collectStepOracle(step);
+        const build = assertFrontendBuild(oracle.frontendVersions, DEFAULT_CONFIG.expectedFrontendVersion);
+        if (!entry.settledOk || !oracle.urlWorkspaceOk || !oracle.urlProjectOk ||
+            oracle.forbiddenWorkspaceHit || oracle.scopeViolations.length) {
+          throw new Error('目录入口未保持指定工作区和项目');
+        }
+        await page.send('Network.setCacheDisabled', { cacheDisabled: false });
+        console.log(`入口静态资源版本: ${build}`);
+      } catch (error) {
+        startup.block('NAV-01 静态资源与测试入口', error.message);
+        allResults.push(...startup.results);
+      }
+    }
     if (allResults.length === 0) {
       for (const file of specFiles) {
         console.log(`\n▶ 执行模块: ${file}`);
@@ -63,6 +82,20 @@ async function main() {
             `拦截偏离测试范围的请求 ${scopeViolations.map(item => item.action).join('、')}`);
         }
         allResults.push(...t.results);
+      }
+      if (DEFAULT_CONFIG.expectedFrontendVersion) {
+        const routing = new TestContext(page, 'bootstrap');
+        const origin = new URL(DEFAULT_CONFIG.consoleBaseUrl).origin;
+        const observed = page.evidenceRecords().filter(record => new URL(record.url).origin === origin);
+        const mismatches = observed.filter(record => record.targetLaneSent === false);
+        if (mismatches.length) {
+          const actions = [...new Set(mismatches.map(record => record.action))];
+          routing.record('NAV-01 实际发送的后端泳道', 'REGRESSION_FAIL',
+            `${mismatches.length} 个请求未发送目标泳道头 ${DEFAULT_CONFIG.laneEnv}（${actions.join('、')}）`);
+        } else if (observed.every(record => record.targetLaneSent === null)) {
+          routing.block('NAV-01 实际发送的后端泳道', '未采集到 Context 请求的实际泳道头');
+        }
+        allResults.push(...routing.results);
       }
     }
     await page.flushResponseMetadata();
@@ -103,8 +136,8 @@ async function main() {
     '',
     '## 二、全量接口耗时与 RequestId 采集全景表',
     '',
-    '| 步骤模块 | Action | HTTP | 耗时 (ms) | RequestId | 错误码 | WorkspaceId 携带 | 慢响应判定 |',
-    '|---|---|---:|---:|---|---|---|---|',
+    '| 步骤模块 | Action | HTTP | 耗时 (ms) | RequestId | 错误码 | WorkspaceId 携带 | 目标泳道头 | 慢响应判定 |',
+    '|---|---|---:|---:|---|---|---|---|---|',
     ...page.evidenceRecords().map(r => {
       const slowFlag = r.pending
         ? '未完成'
@@ -115,7 +148,8 @@ async function main() {
             : r.durationMs > r.sloLimitMs
               ? `超红线 (>${r.sloLimitMs}ms)`
               : '达标';
-      return `| \`${r.step}\` | \`${r.action}\` | ${r.httpStatus ?? '—'} | ${r.durationMs ?? '—'} | \`${r.requestId || '—'}\` | ${r.errorCode || '—'} | ${r.workspaceId || '—'} | ${slowFlag} |`;
+      const lane = r.targetLaneSent === null ? '未取得' : r.targetLaneSent ? '匹配' : '缺失或不符';
+      return `| \`${r.step}\` | \`${r.action}\` | ${r.httpStatus ?? '—'} | ${r.durationMs ?? '—'} | \`${r.requestId || '—'}\` | ${r.errorCode || '—'} | ${r.workspaceId || '—'} | ${lane} | ${slowFlag} |`;
     }),
     '',
   ];

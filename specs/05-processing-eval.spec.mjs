@@ -49,7 +49,11 @@ async function openKnownRunReport(page, cfg, domainId, taskId, stepName) {
       if (/无法读取知识加工运行报告/.test(txt)) return 'LOAD_ERROR';
       if (/正在加载本次运行的变更建议/.test(txt)) return false;
       const hasReportTabs = ['概览', '效果评估', '产物与来源', '执行日志'].every(label =>
-        [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].some(
+        [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].some(
           el => (el.textContent || '').trim() === label
         )
       );
@@ -64,7 +68,11 @@ async function openKnownRunReport(page, cfg, domainId, taskId, stepName) {
       const txt = document.body?.innerText || '';
       if (/无法读取知识加工运行报告/.test(txt)) return 'LOAD_ERROR';
       if (/正在加载本次运行的变更建议/.test(txt)) return false;
-      const tabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].filter(
+      const tabs = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].filter(
         el => ['概览', '效果评估', '产物与来源', '执行日志'].includes((el.textContent || '').trim())
       );
       return tabs.length >= 4 ? 'READY' : false;
@@ -86,7 +94,11 @@ async function openKnownRunReport(page, cfg, domainId, taskId, stepName) {
 async function switchReportTab(page, tabTitle) {
   const tabBox = await page.evalJSON(`(() => {
     const target = ${JSON.stringify(tabTitle)};
-    const el = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].find(
+    const el = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(
       node => (node.textContent || '').trim() === target
     );
     if (!el) return null;
@@ -191,7 +203,11 @@ export async function run(t, page, cfg) {
       }
 
       const hubInfo = await page.evalJSON(() => {
-        const topTabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')]
+        const topTabs = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ]
           .map(el => {
             const r = el.getBoundingClientRect();
             return { label: (el.textContent || '').trim(), x: r.x, y: r.y, width: r.width, height: r.height };
@@ -248,7 +264,11 @@ export async function run(t, page, cfg) {
           if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
           const txt = document.body?.innerText || '';
           if (/正在加载本次运行的变更建议/.test(txt)) return false;
-          const reportTabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')]
+          const reportTabs = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ]
             .map(el => {
               const r = el.getBoundingClientRect();
               return { label: (el.textContent || '').trim(), x: r.x, y: r.y, width: r.width, height: r.height };

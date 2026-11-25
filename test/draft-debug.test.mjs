@@ -124,7 +124,7 @@ function createHarnessPage({
       }
       if (method === 'Input.dispatchMouseEvent' && params.type === 'mouseReleased') {
         const { x, y } = params;
-        // 版本与记录 Tab 坐标区 (x: 200..300, y: 120..160)
+        // MCP 服务 Tab 坐标区 (x: 200..300, y: 120..160)
         if (x >= 200 && x <= 300 && y >= 120 && y <= 160) {
           activeDetailTab = 'versions';
           pushRecord({

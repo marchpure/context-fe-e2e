@@ -13,10 +13,9 @@ import {
 
 async function readWorkbenchChatDom(page) {
   return page.evalJSON(() => {
-    const activeTabEl = document.querySelector(
-      '.arco-tabs-header-title-active, [role="tab"][aria-selected="true"]'
-    );
-    const chatTabActive = (activeTabEl?.textContent || '').trim() === '调试台';
+    const chatTabActive = new URLSearchParams(location.search).get('tab') === 'chat' ||
+      [...document.querySelectorAll('ve-tabs[type="capsule"]')].some(host =>
+        host.activeTab === 'chat' || host.getAttribute('active-tab') === 'chat');
     const hasSpin = Boolean(
       document.querySelector('.console-content-wrapper-v2 .arco-spin-loading, .spin-center')
     );
@@ -117,7 +116,11 @@ export async function run(t, page, cfg) {
         timeoutMs: 20000,
         readyFn: () => {
           if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
-          const tabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].filter(
+          const tabs = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].filter(
             el => {
               const txt = (el.textContent || '').trim();
               const r = el.getBoundingClientRect();
@@ -156,7 +159,11 @@ export async function run(t, page, cfg) {
       }
 
       const capsuleTabs = await page.evalJSON(() =>
-        [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')]
+        [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ]
           .map(el => {
             const r = el.getBoundingClientRect();
             return { label: (el.textContent || '').trim(), x: r.x, y: r.y, width: r.width, height: r.height };
@@ -185,7 +192,11 @@ export async function run(t, page, cfg) {
       page.setStep(step);
 
       const chatTab = await page.evalJSON(() => {
-        const el = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].find(
+        const el = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(
           node => (node.textContent || '').trim() === '调试台'
         );
         if (!el) return null;

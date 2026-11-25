@@ -2,12 +2,12 @@ import { assertCatalogReadBudget } from '../lib/regression-checks.mjs';
 // 模块 02：资产目录（/context/catalog）端到端真机只读回归套件
 // 覆盖：
 // 1. 冷启动慢列表完整收敛（禁止凭标题/导航/按钮/在途请求假绿）与树计数一致性
-// 2. [P0 复现] 从已加载专用 OWN codex-e2e 来源用真实鼠标点击左侧「所有资产单元」，退出 Spinner 出现预期行并点进连接与资产
-// 3. 已知固定内置知识库 / PostgreSQL / Bitable 汇总规模与详情真实可见行一致性
+// 2. [P0 复现] 从已加载专用 OWN codex-e2e 来源用真实鼠标点击左侧「所有资产」，退出 Spinner 出现预期行并点进连接与资产
+// 3. 已知固定内置知识库 / PostgreSQL / Bitable 预置规模与详情真实可见行一致性
 // 4. 类别页签（知识库/数据库/代码仓/业务应用）与资产类型筛选（文档/数据表）
 // 5. 检索有结果 -> 无结果明确空态（与错误态严格区分） -> 点击「所有资产」清空恢复全列表
-// 6. 目录树搜索来源、索引状态徽标、来源「处理记录」抽屉（含 Bitable 历史可读）与零 1970 时间戳
-// 7. 快速连续热切来源与「所有资产单元」竞态防护 + 浏览器前进/后退保持状态与 workspaceId
+// 6. 目录树搜索目录、索引状态徽标、来源「处理记录」抽屉（含 Bitable 历史可读）与零 1970 时间戳
+// 7. 快速连续热切来源与「所有资产」竞态防护 + 浏览器前进/后退保持状态与 workspaceId
 // 8. 存量 TOS「管理同步范围」目录探测红线（CTX-016）与新建连接死入口守卫（CTX-020）
 
 import {
@@ -20,7 +20,6 @@ import {
   assertStepOracleHealthy,
   captureCatalogDomSnapshot,
   dispatchRealMouseClick,
-  evaluateFixedFixtureRow,
   isValidDisplayTimestamp,
   pickDedicatedSourceFixture,
   verifyTreeAndOverviewCounts,
@@ -28,6 +27,7 @@ import {
   waitForCatalogSettled,
   waitForSourceHistorySettled,
 } from '../lib/catalog-checks.mjs';
+import { assertListEntriesPage } from '../lib/list-entries-contract.mjs';
 
 function pickSyntheticAsset(rows) {
   return (rows || []).find(row => row.name &&
@@ -35,6 +35,12 @@ function pickSyntheticAsset(rows) {
     !FORBIDDEN_FIXTURE_PREFIX.test(row.sourceText) &&
     (OWN_FIXTURE_PREFIX.test(row.name) || OWN_FIXTURE_PREFIX.test(row.sourceText))
   );
+}
+
+function checkCatalogWirePages(records) {
+  for (const record of records) {
+    if (record.action === 'ListContextEntries') assertListEntriesPage(record, { pageSize: 10 });
+  }
 }
 
 async function setReactInputValue(page, selector, nextValue) {
@@ -54,77 +60,44 @@ async function setReactInputValue(page, selector, nextValue) {
   }
 }
 
-async function queryOverviewRowByUnitSearch(page, unitName) {
-  const searchSelector = 'input[placeholder="搜索资产单元名称或工具"]';
-  await setReactInputValue(page, searchSelector, unitName);
-  const matched = await page.waitFor(
-    `(() => {
-      const tables = Array.from(document.querySelectorAll('main .arco-table'));
-      const overview = tables.find(tbl =>
-        Array.from(tbl.querySelectorAll('thead th')).some(th => (th.innerText || '').includes('资产单元名称'))
-      );
-      if (!overview) return false;
-      const rows = Array.from(overview.querySelectorAll('tbody tr')).filter(
-        tr => !tr.querySelector('.arco-empty') && !tr.classList.contains('arco-table-empty-row')
-      );
-      const empty = overview.querySelector('.arco-empty-description');
-      if (rows.length === 0 && empty) return { rows: [], empty: (empty.innerText || '').trim() };
-      if (rows.length === 0) return false;
-      return {
-        rows: rows.map(tr => {
-          const tds = Array.from(tr.querySelectorAll('td'));
-          const btn = tds[0]?.querySelector('button, a');
-          return {
-            name: (btn?.textContent || tds[0]?.innerText || '').split('\\n')[0].trim(),
-            category: (tds[1]?.innerText || '').trim(),
-            scaleText: (tds[2]?.innerText || '').trim(),
-          };
-        }),
-        empty: '',
-      };
-    })()`,
-    { timeoutMs: 8000, intervalMs: 150, label: `unit-search:${unitName}` }
-  );
-  return matched.ok ? matched.value.rows || [] : [];
-}
+const directorySearch = 'aside input[placeholder="搜索目录"]';
 
-async function clearUnitSearchInput(page) {
-  const hasInput = await page.evalJSON(
-    `Boolean(document.querySelector('input[placeholder="搜索资产单元名称或工具"]'))`
-  );
-  if (hasInput) {
-    await setReactInputValue(page, 'input[placeholder="搜索资产单元名称或工具"]', '');
-    await page.sleep(150);
-  }
+async function findSourceInDirectory(page, sourceName) {
+  await setReactInputValue(page, directorySearch, sourceName);
+  const result = await page.waitFor(`(() => {
+    const nav = document.querySelector('nav[aria-label="数据目录"]');
+    return [...(nav?.querySelectorAll('ul > li > ul > li > button') || [])]
+      .some(button => button.innerText.trim() === ${JSON.stringify(sourceName)});
+  })()`, { timeoutMs: 5000 });
+  await setReactInputValue(page, directorySearch, '');
+  return result.ok;
 }
 
 function leftTreeAllNodeExpr() {
-  return `(() => {
-    const aside = Array.from(document.querySelectorAll('aside')).find(el =>
-      el.querySelector('[data-testid="tree-count-all"]') ||
-      el.querySelector('input[placeholder="搜索来源"]')
-    );
-    if (!aside) return null;
-    const badge = aside.querySelector('[data-testid="tree-count-all"]');
-    if (badge) return badge.closest('.arco-tree-node-title');
-    return Array.from(aside.querySelectorAll('.arco-tree-node-title')).find(el =>
-      (el.innerText || '').trim().startsWith(${JSON.stringify(CATALOG_ALL_UNITS_LABEL)})
-    ) || null;
-  })()`;
+  return `document.querySelector('nav[aria-label="数据目录"] [data-testid="tree-count-all"]')?.closest("button")`;
 }
 
 function leftTreeSourceNodeExpr(sourceName) {
-  return `(() => {
-    const aside = Array.from(document.querySelectorAll('aside')).find(el =>
-      el.querySelector('input[placeholder="搜索来源"]') ||
-      el.querySelector('[data-testid="tree-count-all"]')
-    );
-    if (!aside) return null;
-    const span = Array.from(aside.querySelectorAll('.arco-tree-node-title span[title]')).find(
-      el => el.getAttribute('title') === ${JSON.stringify(sourceName)}
-    );
-    return span ? span.closest('.arco-tree-node-title') : null;
-  })()`;
+  return `Array.from(document.querySelectorAll('nav[aria-label="数据目录"] ul > li > ul > li > button'))
+    .find(button => button.innerText.trim() === ${JSON.stringify(sourceName)})`;
+}
+
+async function setKnowledgeQuery(page, value) {
+  const focused = await page.evalJSON(() => {
+    const host = document.querySelector('section[aria-label="搜索资产或业务知识"] [aria-label="搜索资产或业务知识"]');
+    const input = host?.matches('input') ? host : host?.shadowRoot?.querySelector('input');
+    if (!input) return false;
+    input.focus();
+    input.select();
+    return true;
+  });
+  if (!focused) throw new Error('知识检索输入不可用');
+  await page.send('Input.insertText', { text: value });
+  await dispatchRealMouseClick(
+    page,
+    `document.querySelector('section[aria-label="搜索资产或业务知识"] [aria-label="搜索"]')`,
+    '搜索资产或业务知识'
+  );
 }
 
 export async function run(t, page, cfg) {
@@ -132,14 +105,14 @@ export async function run(t, page, cfg) {
   let workspaceEmpty = false;
 
   // -------------------------------------------------------------------------
-  // 1. 冷启动：必须等树、单元汇总与慢列表 AssetTable 全部退出 Spinner 且接口清零
+  // 1. 冷启动：必须等数据目录与慢列表 AssetTable 全部退出 Spinner 且接口清零
   // -------------------------------------------------------------------------
-  await t.check('资产目录冷启动退出全部 Spinner，左侧目录树与单元汇总计数一致且慢接口达标', async () => {
+  await t.check('资产目录冷启动退出全部 Spinner，数据目录分组计数一致且慢接口达标', async () => {
     const step = '02-catalog-cold-open';
     const navStart = Date.now();
     await page.gotoContext('/context/catalog', {
       stepName: step,
-      readyFn: () => Boolean(document.querySelector('aside input[placeholder="搜索来源"]')),
+      readyFn: () => Boolean(document.querySelector('aside input[placeholder="搜索目录"]')),
     });
     const settled = await waitForCatalogSettled(page, { mode: 'all' }, { timeoutMs: 20000 });
     const oracle = await page.collectStepOracle(step);
@@ -156,6 +129,7 @@ export async function run(t, page, cfg) {
 
     const coldLoadMs = Date.now() - navStart;
     const readEvidence = assertCatalogReadBudget(oracle, cfg, coldLoadMs);
+    checkCatalogWirePages(oracle.records);
     coldSnapshot = settled.snapshot;
     const countCheck = verifyTreeAndOverviewCounts(coldSnapshot);
     if (!countCheck.ok) {
@@ -172,7 +146,7 @@ export async function run(t, page, cfg) {
       return `空工作区明确渲染空态 (${settled.verdict.reason}), totalMs=${Date.now() - navStart}ms`;
     }
 
-    return `settled=${Date.now() - navStart}ms, treeTotal=${countCheck.total}, overviewRows=${settled.verdict.overviewRowCount}, assetRows=${settled.verdict.assetRowCount}, APIs=${oracle.records.length}, ListContextEntries=${readEvidence}`;
+    return `settled=${Date.now() - navStart}ms, treeTotal=${countCheck.total}, assetRows=${settled.verdict.assetRowCount}, APIs=${oracle.records.length}, ListContextEntries=${readEvidence}`;
   });
 
   // -------------------------------------------------------------------------
@@ -194,7 +168,7 @@ export async function run(t, page, cfg) {
   });
 
   // -------------------------------------------------------------------------
-  // 3. [P0 用户复现] 已加载专用 codex-e2e 来源 -> 真实鼠标点击左侧「所有资产单元」 -> 退出 Spinner 出现预期行并能点进连接与资产
+  // 3. [P0 用户复现] 已加载专用 codex-e2e 来源 -> 真实鼠标点击左侧「所有资产」 -> 退出 Spinner 出现预期行并能点进连接与资产
   // -------------------------------------------------------------------------
   await t.check(
     `[P0] 从已加载专用 codex-e2e 来源用真实鼠标点击左侧「${CATALOG_ALL_UNITS_LABEL}」，退出 Spinner 出现预期行并能点进连接与资产`,
@@ -212,7 +186,7 @@ export async function run(t, page, cfg) {
 
       // 汇总可见来源与目录树节点，优先挑选 OWN codex-e2e-* 专用 fixture
       const candidateItems = [
-        ...(coldSnapshot.overviewRows || []),
+        ...(coldSnapshot.directoryRows || []),
         ...(coldSnapshot.treeConnectionNames || []).map(name => ({ name })),
       ];
       const picked = pickDedicatedSourceFixture(candidateItems);
@@ -250,7 +224,7 @@ export async function run(t, page, cfg) {
         throw new Error(`进入专用来源「${fixtureName}」后 URL 未携带 source 参数`);
       }
 
-      // Step B: 用真实鼠标点击左侧目录树顶层「所有资产单元」（对应用户所述「所有资产」当前真实 UI 名称）
+      // Step B: 用真实鼠标点击左侧目录树顶层「所有资产」（对应用户所述「所有资产」当前真实 UI 名称）
       const allStep = '02-source-to-all-read';
       page.setStep(allStep);
       const allClickStarted = Date.now();
@@ -274,25 +248,17 @@ export async function run(t, page, cfg) {
       const clickToAssetsMs = Date.now() - allClickStarted;
       const allOracle = await page.collectStepOracle(allStep);
       assertCatalogReadBudget(allOracle, cfg, clickToAssetsMs);
+      checkCatalogWirePages(allOracle.records);
       page.setStep(step);
 
-      // Step C: 从转换后的「所有资产单元」汇总表用真实鼠标点进该连接
-      if (!(allSettled.snapshot.overviewRows || []).some(row => row.name === fixtureName)) {
-        await queryOverviewRowByUnitSearch(page, fixtureName);
+      // 从数据目录重新打开相同来源，校验来源 ID 和加载结果。
+      if (!(allSettled.snapshot.directoryRows || []).some(row => row.name === fixtureName)) {
+        throw new Error(`恢复列表后数据目录缺少来源「${fixtureName}」`);
       }
       await dispatchRealMouseClick(
         page,
-        `(() => {
-          const tables = Array.from(document.querySelectorAll('main .arco-table'));
-          const overview = tables.find(tbl =>
-            Array.from(tbl.querySelectorAll('thead th')).some(th => (th.innerText || '').includes('资产单元名称'))
-          );
-          if (!overview) return null;
-          return Array.from(overview.querySelectorAll('tbody button')).find(
-            b => (b.textContent || '').trim() === ${JSON.stringify(fixtureName)}
-          ) || null;
-        })()`,
-        `汇总表连接按钮「${fixtureName}」`
+        leftTreeSourceNodeExpr(fixtureName),
+        `数据目录来源按钮「${fixtureName}」`
       );
       const reenterSource = await waitForCatalogSettled(
         page,
@@ -309,7 +275,7 @@ export async function run(t, page, cfg) {
         );
       }
 
-      // Step D: 再次用真实鼠标回到「所有资产单元」，并点进一条安全资产行验证预览抽屉与完整详情跳转
+      // Step D: 再次用真实鼠标回到「所有资产」，并点进一条安全资产行验证完整详情跳转
       await dispatchRealMouseClick(
         page,
         leftTreeAllNodeExpr(),
@@ -321,7 +287,6 @@ export async function run(t, page, cfg) {
           `再次返回「${CATALOG_ALL_UNITS_LABEL}」失败: ${backAll.verdict?.reason}`
         );
       }
-      await clearUnitSearchInput(page);
 
       const safeAssetRow = pickSyntheticAsset(backAll.snapshot.assetRows);
       if (!safeAssetRow) {
@@ -350,31 +315,6 @@ export async function run(t, page, cfg) {
         `资产行「${safeAssetRow.name}」`
       );
 
-      const previewReady = await page.waitFor(
-        `(() => {
-          const drawer = Array.from(document.querySelectorAll('.arco-drawer')).find(d =>
-            (d.innerText || '').includes('查看完整详情')
-          );
-          if (!drawer) return false;
-          const spinning = drawer.querySelector('.arco-spin-loading, .arco-spin > .arco-spin-icon');
-          if (spinning) return false;
-          if ((drawer.innerText || '').includes('资产加载失败')) return { error: true };
-          const title = (drawer.querySelector('.arco-drawer-header')?.innerText || '').trim();
-          return title.includes(${JSON.stringify(safeAssetRow.name)}) &&
-            (drawer.innerText || '').includes('资产概览') ? { error: false } : false;
-        })()`,
-        { timeoutMs: 12000, intervalMs: 180, label: 'asset-preview-drawer' }
-      );
-      if (!previewReady.ok || previewReady.value?.error) {
-        throw new Error(`点击资产「${safeAssetRow.name}」未正常加载预览抽屉`);
-      }
-
-      await dispatchRealMouseClick(
-        page,
-        `Array.from(document.querySelectorAll('.arco-drawer button')).find(b => (b.innerText || '').trim() === '查看完整详情') || null`,
-        '预览抽屉「查看完整详情」按钮'
-      );
-
       const detailSettled = await waitForAssetDetailSettled(page, { timeoutMs: 18000 });
       if (
         !detailSettled.ok ||
@@ -392,7 +332,7 @@ export async function run(t, page, cfg) {
       // 点击详情页左上角返回按钮回到 /context/catalog
       await dispatchRealMouseClick(
         page,
-        `document.querySelector('.c-m-detail-header-back')`,
+        `document.querySelector('.ak-detail-back')`,
         '资产详情返回按钮'
       );
       const returnedCatalog = await waitForCatalogSettled(page, { mode: 'all' }, { timeoutMs: 18000 });
@@ -401,17 +341,17 @@ export async function run(t, page, cfg) {
       }
 
       assertStepOracleHealthy(await page.collectStepOracle(step));
-      return `点击到列表可用 ${clickToAssetsMs}ms, source=${fixtureName}(${loadedSourceId}) -> ${CATALOG_ALL_UNITS_LABEL}(overview=${allSettled.verdict.overviewRowCount}, assets=${allSettled.verdict.assetRowCount}) -> asset=${safeAssetRow.name}(${detailSettled.verdict.status})`;
+      return `点击到列表可用 ${clickToAssetsMs}ms, source=${fixtureName}(${loadedSourceId}) -> ${CATALOG_ALL_UNITS_LABEL}(assets=${allSettled.verdict.assetRowCount}) -> asset=${safeAssetRow.name}(${detailSettled.verdict.status})`;
     }
   );
 
   // -------------------------------------------------------------------------
-  // 4. 已知固定内置知识库 / PG / Bitable 汇总规模与详情真实可见行检查
+  // 4. 已知固定内置知识库 / PG / Bitable 预置规模与详情真实可见行检查
   // -------------------------------------------------------------------------
-  await t.check('已知固定的内置知识库、PostgreSQL 与 Bitable 在汇总与来源详情显示一致的真实可见行', async () => {
+  await t.check('已知固定的内置知识库、PostgreSQL 与 Bitable 在数据目录与来源详情显示真实可见行', async () => {
     if (cfg.workspaceId !== '800e2e0a-bb05-4591-8cd2-f8df54be0ebe' || workspaceEmpty) {
       t.block(
-        '已知固定的内置知识库、PostgreSQL 与 Bitable 汇总与详情核对',
+        '已知固定的内置知识库、PostgreSQL 与 Bitable 目录与详情核对',
         `当前工作区 (${cfg.workspaceId}) 非标准测试工作区或为空，跳过固定实体计数断言`
       );
       return;
@@ -424,31 +364,11 @@ export async function run(t, page, cfg) {
     const verifiedParts = [];
 
     for (const spec of KNOWN_FIXED_FIXTURES) {
-      const rows = await queryOverviewRowByUnitSearch(page, spec.name);
-      const check = evaluateFixedFixtureRow(rows, spec);
-      if (!check.found) {
+      if (!(await findSourceInDirectory(page, spec.name))) {
         missingFixtures.push(spec.name);
         continue;
       }
-      if (!check.ok) {
-        await clearUnitSearchInput(page);
-        throw new Error(check.reason);
-      }
-
-      // 点进该连接核对详情面板真实可见行数
-      await dispatchRealMouseClick(
-        page,
-        `(() => {
-          const tables = Array.from(document.querySelectorAll('main .arco-table'));
-          const overview = tables.find(tbl =>
-            Array.from(tbl.querySelectorAll('thead th')).some(th => (th.innerText || '').includes('资产单元名称'))
-          );
-          return Array.from(overview?.querySelectorAll('tbody button') || []).find(
-            b => (b.textContent || '').trim() === ${JSON.stringify(spec.name)}
-          ) || null;
-        })()`,
-        `固定来源「${spec.name}」`
-      );
+      await dispatchRealMouseClick(page, leftTreeSourceNodeExpr(spec.name), `固定来源「${spec.name}」`);
 
       const unitSettled = await waitForCatalogSettled(
         page,
@@ -462,7 +382,7 @@ export async function run(t, page, cfg) {
       }
       if (unitSettled.verdict.unitRowCount !== spec.expectedRowCount) {
         throw new Error(
-          `固定来源「${spec.name}」汇总显示「${spec.expectedScale}」，但来源详情实际可见 ${unitSettled.verdict.unitRowCount} 行（预期 ${spec.expectedRowCount} 行）`
+          `固定来源「${spec.name}」预期「${spec.expectedScale}」，但来源详情实际可见 ${unitSettled.verdict.unitRowCount} 行（预期 ${spec.expectedRowCount} 行）`
         );
       }
 
@@ -479,7 +399,7 @@ export async function run(t, page, cfg) {
 
       verifiedParts.push(`${spec.name}=${spec.expectedScale}(实测 ${unitSettled.verdict.unitRowCount} 行)`);
 
-      // 用真实鼠标切回「所有资产单元」继续下一项
+      // 用真实鼠标切回「所有资产」继续下一项
       await dispatchRealMouseClick(
         page,
         leftTreeAllNodeExpr(),
@@ -491,13 +411,12 @@ export async function run(t, page, cfg) {
       }
     }
 
-    await clearUnitSearchInput(page);
     const oracle = await page.collectStepOracle(step);
     assertStepOracleHealthy(oracle);
 
     if (verifiedParts.length === 0) {
       t.block(
-        '已知固定的内置知识库、PostgreSQL 与 Bitable 汇总与详情核对',
+        '已知固定的内置知识库、PostgreSQL 与 Bitable 目录与详情核对',
         `工作区缺少预设固定来源: ${missingFixtures.join(', ')}`
       );
       return;
@@ -524,7 +443,6 @@ export async function run(t, page, cfg) {
 
     const step = '02-category-and-type-tabs';
     page.setStep(step);
-    await clearUnitSearchInput(page);
 
     const base = await waitForCatalogSettled(page, { mode: 'all' }, { timeoutMs: 15000 });
     if (!base.ok) throw new Error(`进入全部单元视图未就绪: ${base.verdict?.reason}`);
@@ -536,32 +454,20 @@ export async function run(t, page, cfg) {
       ['coderepo', '代码仓'],
       ['app_mcp', '业务应用'],
     ]) {
-      await dispatchRealMouseClick(
-        page,
-        `Array.from(document.querySelectorAll('main .arco-radio-button')).find(el => (el.innerText || '').trim() === ${JSON.stringify(tabLabel)}) || null`,
-        `资产单元类别页签「${tabLabel}」`
-      );
-      await page.sleep(160);
-      const snap = await captureCatalogDomSnapshot(page);
-      const expectedTotal = groupCounts[groupKey] || 0;
-      if (expectedTotal === 0 && snap.overviewRows.length !== 0) {
-        throw new Error(`类别「${tabLabel}」树计数为 0，但表格仍渲染了 ${snap.overviewRows.length} 行`);
+      const groupButton = `document.querySelector('[data-testid="tree-count-${groupKey}"]')?.closest('button')`;
+      const expectedTotal = groupCounts[groupKey];
+      if (!Number.isInteger(expectedTotal)) throw new Error(`类别「${tabLabel}」缺少目录计数`);
+      if (expectedTotal > 0) {
+        const expanded = await page.evalJSON(`${groupButton}?.getAttribute('aria-expanded') === 'true'`);
+        if (expanded) await dispatchRealMouseClick(page, groupButton, `折叠「${tabLabel}」`);
+        await dispatchRealMouseClick(page, groupButton, `展开「${tabLabel}」`);
       }
-      if (expectedTotal > 0 && snap.overviewRows.length === 0) {
-        throw new Error(`类别「${tabLabel}」树计数为 ${expectedTotal}，但表格为空`);
-      }
-      const wrongCat = snap.overviewRows.find(r => r.category !== tabLabel);
-      if (wrongCat) {
-        throw new Error(`类别「${tabLabel}」页签混入了「${wrongCat.category}」行 (${wrongCat.name})`);
+      const snapshot = await captureCatalogDomSnapshot(page);
+      const rows = snapshot.directoryRows.filter(row => row.category === groupKey);
+      if (rows.length !== expectedTotal) {
+        throw new Error(`类别「${tabLabel}」目录显示 ${expectedTotal}，实际来源 ${rows.length}`);
       }
     }
-
-    // 切回「全部单元 (N)」
-    await dispatchRealMouseClick(
-      page,
-      `Array.from(document.querySelectorAll('main .arco-radio-button')).find(el => (el.innerText || '').trim().startsWith('全部单元')) || null`,
-      '资产单元类别页签「全部单元」'
-    );
 
     // 测 AssetTable 类型下拉筛选：文档 -> 数据表 -> 清空全部
     for (const [typeValue, uiOptionLabel, expectedColText] of [
@@ -621,7 +527,7 @@ export async function run(t, page, cfg) {
 
     const oracle = await page.collectStepOracle(step);
     assertStepOracleHealthy(oracle);
-    return `四类单元页签与文档/数据表类型筛选核验通过，恢复后资产行=${restored.verdict.assetRowCount}`;
+    return `四类来源目录与文档/数据表类型筛选核验通过，恢复后资产行=${restored.verdict.assetRowCount}`;
   });
 
   // -------------------------------------------------------------------------
@@ -647,19 +553,7 @@ export async function run(t, page, cfg) {
       return;
     }
     const hitKeyword = sampleAsset.name.slice(0, Math.min(24, sampleAsset.name.length));
-    const searchInputSelector = 'input[placeholder="例如：收入金额的口径是什么？"]';
-
-    // 1) 搜索有结果
-    await setReactInputValue(page, searchInputSelector, hitKeyword);
-    await dispatchRealMouseClick(
-      page,
-      `(() => {
-        const inp = document.querySelector(${JSON.stringify(searchInputSelector)});
-        const wrapper = inp?.closest('.arco-input-group-wrapper, .arco-input-search') || inp?.parentElement?.parentElement;
-        return wrapper?.querySelector('.arco-input-group-addafter button, button') || null;
-      })()`,
-      '知识检索提交按钮'
-    );
+    await setKnowledgeQuery(page, hitKeyword);
 
     const hitSettled = await waitForCatalogSettled(
       page,
@@ -678,16 +572,7 @@ export async function run(t, page, cfg) {
 
     // 2) 搜索确定不存在的关键词 -> 必须进入明确 EMPTY，绝不能报 ERROR 或空白假绿
     const missKeyword = '__codex_e2e_nonexistent_token_998877__';
-    await setReactInputValue(page, searchInputSelector, missKeyword);
-    await dispatchRealMouseClick(
-      page,
-      `(() => {
-        const inp = document.querySelector(${JSON.stringify(searchInputSelector)});
-        const wrapper = inp?.closest('.arco-input-group-wrapper, .arco-input-search') || inp?.parentElement?.parentElement;
-        return wrapper?.querySelector('.arco-input-group-addafter button, button') || null;
-      })()`,
-      '无结果词检索提交按钮'
-    );
+    await setKnowledgeQuery(page, missKeyword);
 
     const missSettled = await waitForCatalogSettled(
       page,
@@ -702,14 +587,14 @@ export async function run(t, page, cfg) {
         `无结果检索应进入明确 EMPTY 态，实际为 ${missSettled.verdict.status}: ${missSettled.verdict.reason}`
       );
     }
-    if (!missSettled.verdict.reason.includes('没有匹配的资产')) {
+    if (!missSettled.verdict.reason.includes('请调整搜索或筛选条件')) {
       throw new Error(`无结果空态文案不符预期: ${missSettled.verdict.reason}`);
     }
 
     // 3) 用真实鼠标点击 SearchPanel 的「所有资产」重置按钮回到全列表
     await dispatchRealMouseClick(
       page,
-      `Array.from(document.querySelectorAll('button')).find(b => (b.innerText || '').trim() === ${JSON.stringify(CATALOG_SEARCH_RESET_LABEL)}) || null`,
+      `Array.from(document.querySelectorAll('section[aria-label="搜索资产或业务知识"] button')).find(b => (b.innerText || '').trim() === ${JSON.stringify(CATALOG_SEARCH_RESET_LABEL)}) || null`,
       `检索区「${CATALOG_SEARCH_RESET_LABEL}」重置按钮`
     );
 
@@ -729,7 +614,7 @@ export async function run(t, page, cfg) {
   });
 
   // -------------------------------------------------------------------------
-  // 7. 目录树搜索来源 + 来源索引状态与「处理记录」抽屉（含 Bitable 历史可读校验）
+  // 7. 目录树搜索目录 + 来源索引状态与「处理记录」抽屉（含 Bitable 历史可读校验）
   // -------------------------------------------------------------------------
   await t.check('目录树来源过滤、来源索引状态展示与「处理记录」抽屉可读且无 1970 时间戳', async () => {
     if (workspaceEmpty) {
@@ -739,23 +624,23 @@ export async function run(t, page, cfg) {
 
     const step = '02-tree-filter-and-source-history';
     page.setStep(step);
-    const treeInputSelector = 'aside input[placeholder="搜索来源"]';
+    const treeInputSelector = 'aside input[placeholder="搜索目录"]';
 
     // 1) 目录树无匹配来源空态
     await setReactInputValue(page, treeInputSelector, '__codex_e2e_no_source_match__');
     const emptyTree = await page.waitFor(
       `(() => {
         const aside = Array.from(document.querySelectorAll('aside')).find(el =>
-          el.querySelector('input[placeholder="搜索来源"]')
+          el.querySelector('input[placeholder="搜索目录"]')
         );
         const txt = (aside?.querySelector('.arco-empty-description')?.innerText || '').trim();
-        return txt === '没有匹配的来源' ? txt : false;
+        return txt === '没有匹配的目录' ? txt : false;
       })()`,
       { timeoutMs: 6000, intervalMs: 120 }
     );
     if (!emptyTree.ok) {
       await setReactInputValue(page, treeInputSelector, '');
-      throw new Error('目录树搜索不存在来源时未展示「没有匹配的来源」空态');
+      throw new Error('目录树搜索不存在来源时未展示「没有匹配的目录」空态');
     }
 
     // 2) 清空目录树搜索词恢复完整树
@@ -818,13 +703,13 @@ export async function run(t, page, cfg) {
       '来源页头「更多」下拉按钮'
     );
     await page.waitFor(
-      `Array.from(document.querySelectorAll('.arco-dropdown-menu-item, [role="menuitem"]')).some(el => (el.innerText || '').trim() === '处理记录')`,
+      `Array.from(document.querySelectorAll('.arco-dropdown-menu-item, [role="menuitem"]')).some(el => (el.innerText || '').trim() === '查看记录')`,
       { timeoutMs: 5000, intervalMs: 100 }
     );
     await dispatchRealMouseClick(
       page,
-      `Array.from(document.querySelectorAll('.arco-dropdown-menu-item, [role="menuitem"]')).find(el => (el.innerText || '').trim() === '处理记录') || null`,
-      '下拉菜单「处理记录」'
+      `Array.from(document.querySelectorAll('.arco-dropdown-menu-item, [role="menuitem"]')).find(el => (el.innerText || '').trim() === '查看记录') || null`,
+      '下拉菜单「查看记录」'
     );
 
     const historySettled = await waitForSourceHistorySettled(page, { timeoutMs: 15000 });
@@ -835,7 +720,7 @@ export async function run(t, page, cfg) {
       throw new Error(`来源「${targetName}」处理记录报错: ${historySettled.verdict.reason}`);
     }
 
-    // 关闭处理记录抽屉并回到「所有资产单元」
+    // 关闭处理记录抽屉并回到「所有资产」
     await dispatchRealMouseClick(
       page,
       `(() => {
@@ -862,7 +747,7 @@ export async function run(t, page, cfg) {
   // -------------------------------------------------------------------------
   // 8. 热切竞态与浏览器前进/后退
   // -------------------------------------------------------------------------
-  await t.check('快速连续热切来源与「所有资产单元」无陈旧响应覆盖，浏览器后退/前进保持状态与 workspaceId', async () => {
+  await t.check('快速连续热切来源与「所有资产」无陈旧响应覆盖，浏览器后退/前进保持状态与 workspaceId', async () => {
     if (workspaceEmpty) {
       t.block('热切竞态与浏览器前进后退', '当前工作区为空，无来源与资产可供切换');
       return;
@@ -878,7 +763,7 @@ export async function run(t, page, cfg) {
       return;
     }
 
-    // 1) 热切竞态：不等待中间请求完成，连续真实鼠标点击来源 -> 所有资产单元
+    // 1) 热切竞态：不等待中间请求完成，连续真实鼠标点击来源 -> 所有资产
     for (const srcName of raceTargets) {
       await dispatchRealMouseClick(page, leftTreeSourceNodeExpr(srcName), `热切来源「${srcName}」`);
       await page.sleep(40);
@@ -919,16 +804,6 @@ export async function run(t, page, cfg) {
       `资产行「${targetAsset.name}」`
     );
 
-    await page.waitFor(
-      `Array.from(document.querySelectorAll('.arco-drawer button')).some(b => (b.innerText || '').trim() === '查看完整详情')`,
-      { timeoutMs: 12000, intervalMs: 150 }
-    );
-    await dispatchRealMouseClick(
-      page,
-      `Array.from(document.querySelectorAll('.arco-drawer button')).find(b => (b.innerText || '').trim() === '查看完整详情') || null`,
-      '「查看完整详情」按钮'
-    );
-
     const detailFirst = await waitForAssetDetailSettled(page, { timeoutMs: 18000 });
     if (!detailFirst.ok || detailFirst.verdict.status === 'ERROR') {
       throw new Error(`进入资产详情失败: ${detailFirst.verdict?.reason}`);
@@ -954,14 +829,6 @@ export async function run(t, page, cfg) {
     if (!finalCatalog.ok) {
       throw new Error(`二次后退回资产目录未就绪: ${finalCatalog.verdict?.reason}`);
     }
-
-    // 若 URL 残留 preview 参数则关闭预览抽屉
-    await page.evalJSON(() => {
-      const btn = Array.from(document.querySelectorAll('.arco-drawer button')).find(
-        b => (b.innerText || '').trim() === '关闭预览'
-      );
-      if (btn) btn.click();
-    });
 
     const oracle = await page.collectStepOracle(step);
     assertStepOracleHealthy(oracle);
@@ -1075,61 +942,42 @@ export async function run(t, page, cfg) {
         `Array.from(document.querySelectorAll('main header button')).some(b => /添加资产/.test((b.innerText || '').trim()))`
       );
       if (!hasAddBtn) {
-        t.block('添加资产向导死入口核验', '当前身份无 canConnect 权限，未渲染「+ 添加资产」按钮');
+        t.block('添加资产向导死入口核验', '当前身份无 canConnect 权限，未渲染「添加资产」按钮');
         return;
       }
 
       await dispatchRealMouseClick(
         page,
         `Array.from(document.querySelectorAll('main header button')).find(b => /添加资产/.test((b.innerText || '').trim())) || null`,
-        '页头「+ 添加资产」按钮'
+        '页头「添加资产」按钮'
       );
 
-      const modalReady = await page.waitFor(
-        `(() => {
-          const modal = document.querySelector('.arco-modal');
-          if (!modal || modal.getBoundingClientRect().width < 10) return false;
-          return (modal.innerText || '').includes('选择受控资产单元类别') ? (modal.innerText || '').slice(0, 1500) : false;
-        })()`,
-        { timeoutMs: 8000, intervalMs: 120 }
-      );
-      if (!modalReady.ok) {
-        throw new Error('点击「+ 添加资产」后未正常弹出「连接数据」模态框');
-      }
-
-      const hasBizAppOption = await page.evalJSON(
-        `Array.from(document.querySelectorAll('.arco-modal *')).some(el => (el.textContent || '').trim() === '业务应用')`
-      );
-      if (!hasBizAppOption) throw new Error('连接向导缺少业务应用入口');
       await dispatchRealMouseClick(
         page,
-        `Array.from(document.querySelectorAll('.arco-modal .arco-radio, .arco-modal label, .arco-modal [role="radio"]')).find(el => (el.innerText || '').includes('业务应用')) || null`,
-        '向导「业务应用」单选卡片'
+        `Array.from(document.querySelectorAll('[role="menuitem"], .arco-dropdown-menu-item'))
+          .find(item => item.innerText.trim() === '接入在线来源')`,
+        '接入在线来源'
       );
-      await dispatchRealMouseClick(
-        page,
-        `Array.from(document.querySelectorAll('.arco-modal button')).find(b => (b.innerText || '').trim() === '下一步') || null`,
-        '向导「下一步」按钮'
-      );
-      await page.sleep(250);
-      const step1Text = await page.evalJSON(
-        `(() => (document.querySelector('.arco-modal')?.innerText || '').slice(0, 2000))()`
-      );
-      if (!step1Text.includes('选择业务应用或分析数据集类型')) {
-        throw new Error('选择业务应用后未加载对应的数据集类型表单');
-      }
-      const combinedModalText = `${modalReady.value}\n${step1Text}`;
+      const modalReady = await page.waitFor(() => {
+        const dialog = document.querySelector('.arco-modal');
+        const text = dialog?.innerText || '';
+        return ['在线来源', '数据库', '引用已有知识库', '外部 OpenViking', '飞书文档']
+          .every(label => text.includes(label)) ? text : false;
+      }, { timeoutMs: 8000, intervalMs: 120 });
+      if (!modalReady.ok) throw new Error('在线来源选择区未到完整表单终态');
+      const combinedModalText = modalReady.value;
 
       // 严格关闭模态框，绝不点击确认接入
       await dispatchRealMouseClick(
         page,
-        `Array.from(document.querySelectorAll('.arco-modal button')).find(b => (b.innerText || '').trim() === '取消') || null`,
-        '向导「取消」按钮'
+        `document.querySelector('.arco-modal .arco-modal-close-icon')`,
+        '关闭在线来源向导'
       );
-      await page.waitFor(
+      const closed = await page.waitFor(
         `!document.querySelector('.arco-modal') || document.querySelector('.arco-modal').getBoundingClientRect().width === 0`,
         { timeoutMs: 5000, intervalMs: 100 }
       );
+      if (!closed.ok) throw new Error('关闭后在线来源向导仍在显示');
 
       const oracle = await page.collectStepOracle(step);
       assertStepOracleHealthy(oracle);

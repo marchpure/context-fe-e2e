@@ -55,13 +55,15 @@ test('NAV-03 所属领域编辑 URL 和返回目标保留特殊字符项目，�
     seed: 0x112503, runs: 160, file: 'test/seal-regressions.property.test.mjs',
     generate: rng => ({
       id: rng.slug('knowledge'),
-      edit: rng.pick(['none', 'duplicate', 'forbidden', 'no-project', 'other-origin']),
+      edit: rng.pick(['none', 'duplicate', 'forbidden', 'context-workspace', 'project-alias', 'no-project', 'other-origin']),
     }),
   }, ({ id, edit }) => {
     const suffix = '/context/domains/dom-test/detail';
     const url = href(suffix, { tab: 'knowledge', editKnowledge: id });
     if (edit === 'duplicate') url.searchParams.append('workspaceId', cfg.workspaceId);
     if (edit === 'forbidden') url.searchParams.set('workspaceId', cfg.forbiddenWorkspaceId);
+    if (edit === 'context-workspace') url.searchParams.set('contextWorkspaceId', cfg.forbiddenWorkspaceId);
+    if (edit === 'project-alias') url.searchParams.set('ProjectName', 'other-project');
     if (edit === 'no-project') url.searchParams.delete('project');
     if (edit === 'other-origin') url.hostname = 'another.example';
     const check = () => assertScopedRoute(url.href, cfg, suffix, { tab: 'knowledge', editKnowledge: id });
@@ -76,7 +78,7 @@ test('USE-03/07 冻结引文不能串版本、串正文或回到另一个会话'
     seed: 0x112507, runs: 160, file: 'test/seal-regressions.property.test.mjs',
     generate: rng => ({
       version: rng.int(1, 2), sessionId: rng.slug('wbs'),
-      fault: rng.pick(['none', 'body', 'citation', 'session', 'release', 'workspace', 'answer']),
+      fault: rng.pick(['none', 'body', 'citation', 'session', 'release', 'workspace', 'answer', 'mixed-answer', 'mixed-return']),
     }),
   }, ({ version, sessionId, fault }) => {
     const days = version === 1 ? 7 : 15;
@@ -89,10 +91,12 @@ test('USE-03/07 冻结引文不能串版本、串正文或回到另一个会话'
     if (fault === 'release') url.searchParams.set('releaseId', 'rel-other');
     if (fault === 'workspace') url.searchParams.delete('workspaceId');
     const observation = {
-      answer: '退款时效为 ' + (fault === 'answer' ? other : days) + ' 天',
+      answer: '退款时效为 ' + (fault === 'answer' ? other : days) + ' 天' +
+        (fault === 'mixed-answer' ? ` 或 ${other} 天` : ''),
       source: '退款时效 v' + (fault === 'citation' ? 3 - version : version),
       detail: '原文退款时效为 ' + (fault === 'body' ? other : days) + ' 天',
-      href: url.href, returned: { href: back.href, answer: '退款时效为 ' + days + ' 天' },
+      href: url.href, returned: { href: back.href, answer: '退款时效为 ' + days + ' 天' +
+        (fault === 'mixed-return' ? ` 或 ${other} 天` : '') },
     };
     const check = () => assertPinnedCitation(observation, cfg, pin);
     if (fault === 'none') assert.doesNotThrow(check);

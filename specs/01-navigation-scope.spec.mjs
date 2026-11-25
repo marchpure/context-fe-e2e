@@ -176,11 +176,8 @@ export async function run(t, page, cfg) {
             );
             if (spinning) return false;
             const aside = document.querySelector('aside');
-            const hasDetailOrEmpty = Boolean(
-              [...document.querySelectorAll('[role="tab"], button')].some(el =>
-                /工具配置|版本与记录|返回业务领域/.test((el.textContent || '').trim())
-              )
-            );
+            const hasDetailOrEmpty = Boolean(document.querySelector('article h1')?.innerText.trim() &&
+              document.querySelector('article ve-tabs ve-tab-pane[title="工具配置"]'));
             return aside && hasDetailOrEmpty ? window.location.pathname : false;
           },
         }
@@ -206,14 +203,17 @@ export async function run(t, page, cfg) {
         () => {
           if (!window.location.pathname.endsWith('/context/workbench')) return false;
           if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
-          const tabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].filter(
+          const tabs = [...document.querySelectorAll('ve-tabs[type="capsule"]')].flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]).filter(
             el => {
               const txt = (el.textContent || '').trim();
               const r = el.getBoundingClientRect();
               return (txt === '概览' || txt === '调试台') && r.width > 0 && r.height > 0;
             }
           );
-          return tabs.length >= 2 ? { tabCount: tabs.length, href: window.location.href } : false;
+          const terminal = document.querySelector('.context-workbench-chatkit [contenteditable="true"], .context-workbench-chatkit textarea') ||
+            document.querySelector('[class*="overviewPane"] a, [class*="overviewPane"] button:not([disabled]), [class*="overviewPane"] .arco-empty');
+          return tabs.length >= 2 && terminal ? { tabCount: tabs.length, href: window.location.href } : false;
         }
       );
 
@@ -240,8 +240,9 @@ export async function run(t, page, cfg) {
             document.querySelector('main, .console-content-wrapper-v2');
           if (!mainEl) return false;
           const r = mainEl.getBoundingClientRect();
-          const hasHeader = /添加资产|全部资产|知识库|数据表|资产/.test(document.body?.innerText || '');
-          return hasHeader && r.width >= 300 && r.height >= 120
+          const terminal = mainEl.querySelector('tbody tr[data-row-key]') ||
+            mainEl.querySelector('.arco-empty-description');
+          return terminal && r.width >= 300 && r.height >= 120
             ? { width: Math.round(r.width), height: Math.round(r.height) }
             : false;
         },
@@ -277,7 +278,8 @@ export async function run(t, page, cfg) {
         () => {
           if (!window.location.pathname.endsWith('/context/workbench')) return false;
           if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
-          const tabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].filter(
+          const tabs = [...document.querySelectorAll('ve-tabs[type="capsule"]')].flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]).filter(
             el => {
               const txt = (el.textContent || '').trim();
               const r = el.getBoundingClientRect();
@@ -302,11 +304,13 @@ export async function run(t, page, cfg) {
           readyFn: () => {
             if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
             const hasTabs = ['加工记录', '已保存任务'].every(label =>
-              [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].some(
-                el => (el.textContent || '').trim() === label
+              [...document.querySelectorAll('ve-tabs ve-tab-pane')].some(
+                el => el.getAttribute('title') === label
               )
             );
-            return hasTabs ? true : false;
+            const terminal = document.querySelector('tbody tr[data-row-key], .arco-empty-description') ||
+              [...document.querySelectorAll('ve-table')].some(table => table.shadowRoot?.querySelector('tbody tr'));
+            return Boolean(hasTabs && terminal);
           },
         });
         const settledOpen = await waitForTerminalDom(
@@ -324,7 +328,7 @@ export async function run(t, page, cfg) {
         }
 
         const backBtn = await page.evalJSON(() => {
-          const btn = [...document.querySelectorAll('button')].find(
+          const btn = [...document.querySelectorAll('button, ve-button')].find(
             el => (el.textContent || '').trim() === '返回业务领域'
           );
           if (!btn) return null;
@@ -371,7 +375,7 @@ export async function run(t, page, cfg) {
           readyFn: () => {
             if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
             return Boolean(
-              document.querySelector('.arco-table') ||
+              document.querySelector('ve-table.ak-data-table') ||
                 document.querySelector('.arco-empty') ||
                 document.querySelector('.arco-alert')
             );
@@ -396,7 +400,7 @@ export async function run(t, page, cfg) {
         const backBtn = await page.evalJSON(`(() => {
           const forbidden = ${JSON.stringify(cfg.forbiddenWorkspaceId)};
           const contentRoot = document.querySelector('.console-content-wrapper-v2') || document.body;
-          const btn = [...contentRoot.querySelectorAll('button')].find(el => {
+          const btn = [...contentRoot.querySelectorAll('button, ve-button')].find(el => {
             if (el.closest('aside')) return false;
             return (el.textContent || '').trim() === '业务领域';
           });
@@ -483,7 +487,7 @@ export async function run(t, page, cfg) {
         }
 
         const info = await page.evalJSON(() => {
-          const backBtn = [...document.querySelectorAll('button')].find(el =>
+          const backBtn = [...document.querySelectorAll('button, ve-button')].find(el =>
             /返回知识管理|返回目录|返回/.test((el.textContent || '').trim())
           );
           const r = backBtn?.getBoundingClientRect();

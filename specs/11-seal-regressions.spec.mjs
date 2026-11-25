@@ -24,7 +24,7 @@ const domainPath = id => '/context/domains/' + id + '/detail';
 const assetPath = id => '/context/catalog/' + id + '/detail';
 const q = JSON.stringify;
 
-function click(page, label, { within = '', selector = 'button, a, [role="button"], [role="tab"], [role="option"], li.arco-select-option', match = 'exact' } = {}) {
+function click(page, label, { within = '', selector = 'button, ve-button, a, [role="button"], [role="tab"], [role="option"], li.arco-select-option', match = 'exact' } = {}) {
   return dispatchRealMouseClick(page, '(() => {' +
     'const root = ' + (within ? 'document.querySelector(' + q(within) + ')' : 'document') + ';' +
     'const value = ' + q(label) + '; return [...(root?.querySelectorAll(' + q(selector) + ') || [])].find(el => {' +
@@ -74,7 +74,7 @@ function historyRowsExpr() {
 
 async function showHistory(page) {
   await click(page, '更多');
-  await click(page, '处理记录', { selector: '[role="menuitem"], .arco-dropdown-menu-item' });
+  await click(page, '查看记录', { selector: '[role="menuitem"], .arco-dropdown-menu-item' });
   await wait(page, 'document.querySelector(".arco-drawer")?.innerText.includes("处理记录")', '来源处理记录');
 }
 
@@ -100,14 +100,16 @@ async function openPg(page) {
 }
 
 async function appendChooser(page) {
-  await click(page, '+ 追加纳管数据表');
-  await wait(page, textIn('.arco-modal', ['添加表', pg.name, '手动填写表名']), 'PG 目录发现');
+  await click(page, '添加表');
+  await wait(page, textIn('.arco-modal', ['添加表', pg.name]), 'PG 目录发现');
 }
 
 async function readFrozenPg(page, cfg, fixture) {
   await open(page, domainPath(fixture.domainId), '11-pg-freeze');
-  await wait(page, textIn('main', [fixture.domainName, '版本与记录']), '专用 PG 发布领域');
-  await click(page, '版本与记录');
+  await wait(page, textIn('main', [fixture.domainName]), '专用 PG 发布领域');
+  await dispatchRealMouseClick(page, `Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+    [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])])
+    .find(tab => tab.textContent.trim() === 'MCP 服务')`, 'MCP 服务');
   await wait(page, textIn('main', [fixture.version]), 'PG 发布版本');
   const snapshot = await readVersionDrawerSnapshot(page, fixture.version, null);
   const rows = snapshot.rows.map(cells => JSON.stringify(cells));
@@ -265,7 +267,7 @@ export async function run(t, page, cfg) {
         await openPg(page);
         await wait(page, pgRowExpr('row?.innerText.includes("已停止纳管")'), '重新打开仍未纳管');
         page.setStep('11-pg-refresh');
-        await click(page, '同步表结构');
+        await click(page, '同步元数据');
         await showHistory(page);
         const refreshed = await waitNewScan(page, oldRows, 'RefreshMetadata');
         assertScanRow(refreshed, 'RefreshMetadata', { discovered: 2, unchanged: 2 });

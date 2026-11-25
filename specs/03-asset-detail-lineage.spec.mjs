@@ -9,7 +9,6 @@
 
 import {
   ACL_DENIED_ALERT_SUBSTRING,
-  CATALOG_ALL_UNITS_LABEL,
   VALID_INDEX_LABELS,
   assertStepOracleHealthy,
   captureCatalogDomSnapshot,
@@ -21,17 +20,8 @@ import {
 } from '../lib/catalog-checks.mjs';
 
 function leftTreeSourceNodeExpr(sourceName) {
-  return `(() => {
-    const aside = Array.from(document.querySelectorAll('aside')).find(el =>
-      el.querySelector('input[placeholder="搜索来源"]') ||
-      el.querySelector('[data-testid="tree-count-all"]')
-    );
-    if (!aside) return null;
-    const span = Array.from(aside.querySelectorAll('.arco-tree-node-title span[title]')).find(
-      el => el.getAttribute('title') === ${JSON.stringify(sourceName)}
-    );
-    return span ? span.closest('.arco-tree-node-title') : null;
-  })()`;
+  return `Array.from(document.querySelectorAll('nav[aria-label="数据目录"] ul > li > ul > li > button'))
+    .find(button => button.innerText.trim() === ${JSON.stringify(sourceName)})`;
 }
 
 async function openUnitRowFullDetail(page, rowName) {
@@ -41,7 +31,7 @@ async function openUnitRowFullDetail(page, rowName) {
       const tables = Array.from(document.querySelectorAll('main .arco-table'));
       const unitTbl = tables.find(tbl => {
         const hs = Array.from(tbl.querySelectorAll('thead th')).map(th => (th.innerText || '').trim());
-        return hs.includes('文档标题') || hs.includes('已接入数据表');
+        return hs.includes('文档标题') || hs.some(title => title.startsWith('已纳管表名'));
       });
       if (!unitTbl) return null;
       return Array.from(unitTbl.querySelectorAll('tbody button, tbody a')).find(
@@ -49,27 +39,6 @@ async function openUnitRowFullDetail(page, rowName) {
       ) || null;
     })()`,
     `来源治理表资产行「${rowName}」`
-  );
-
-  const drawerReady = await page.waitFor(
-    `(() => {
-      const drawer = Array.from(document.querySelectorAll('.arco-drawer')).find(d =>
-        (d.innerText || '').includes('查看完整详情')
-      );
-      if (!drawer) return false;
-      const spinning = drawer.querySelector('.arco-spin-loading, .arco-spin > .arco-spin-icon');
-      return !spinning;
-    })()`,
-    { timeoutMs: 12000, intervalMs: 150, label: `preview:${rowName}` }
-  );
-  if (!drawerReady.ok) {
-    throw new Error(`点击「${rowName}」后预览抽屉超时未就绪`);
-  }
-
-  await dispatchRealMouseClick(
-    page,
-    `Array.from(document.querySelectorAll('.arco-drawer button')).find(b => (b.innerText || '').trim() === '查看完整详情') || null`,
-    '预览抽屉「查看完整详情」按钮'
   );
 
   return waitForAssetDetailSettled(page, { timeoutMs: 18000 });
@@ -88,7 +57,7 @@ export async function run(t, page, cfg) {
     const navStart = Date.now();
     await page.gotoContext(detailPath, {
       stepName: step,
-      readyFn: () => Boolean(document.querySelector('.c-m-detail, [class*="PageDetail"], main')),
+      readyFn: () => Boolean(document.querySelector('article.ak-detail')),
     });
     const settled = await waitForAssetDetailSettled(page, { timeoutMs: 20000 });
     const oracle = await page.collectStepOracle(step);
@@ -335,7 +304,11 @@ export async function run(t, page, cfg) {
     // 切换到「权限」页签核对访问权限信息与远端协作者 ACL 状态可读
     await dispatchRealMouseClick(
       page,
-      `Array.from(document.querySelectorAll('.arco-tabs-header-title, [role="tab"]')).find(el => (el.innerText || '').trim() === '权限') || null`,
+      `[
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(el => (el.innerText || '').trim() === '权限') || null`,
       '资产详情「权限」页签'
     );
 
@@ -343,7 +316,7 @@ export async function run(t, page, cfg) {
       `(() => {
         const u = new URL(window.location.href);
         if (u.searchParams.get('tab') !== 'permission') return false;
-        const root = document.querySelector('.c-m-detail, [class*="PageDetail"], main') || document.body;
+        const root = document.querySelector('article.ak-detail') || document.body;
         if (root.querySelector('.arco-spin-loading, .arco-spin > .arco-spin-icon')) return false;
         const txt = root.innerText || '';
         if (txt.includes('权限信息加载失败')) return { error: '权限信息加载失败' };
@@ -442,7 +415,11 @@ export async function run(t, page, cfg) {
       page.setStep(step);
       await dispatchRealMouseClick(
         page,
-        `Array.from(document.querySelectorAll('.arco-tabs-header-title, [role="tab"]')).find(el => (el.innerText || '').trim() === '数据血缘') || null`,
+        `[
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(el => (el.innerText || '').trim() === '数据血缘') || null`,
         '资产详情「数据血缘」页签'
       );
 
@@ -463,7 +440,7 @@ export async function run(t, page, cfg) {
       await dispatchRealMouseClick(
         page,
         `(() => {
-          const root = document.querySelector('.c-m-detail, [class*="PageDetail"], main') || document.body;
+          const root = document.querySelector('article.ak-detail') || document.body;
           return root.querySelector('.arco-card') || null;
         })()`,
         '数据血缘当前对象节点卡片'

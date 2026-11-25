@@ -2,7 +2,10 @@ import { cdpClickPoint, KNOWN_FIXTURES, validateStepTerminalState } from '../lib
 
 async function openTab(page, label) {
   const target = await page.waitFor(`(() => {
-    const tab = [...document.querySelectorAll('[role="tab"]')].find(node =>
+    const tabs = [...document.querySelectorAll('[role="tab"]'),
+      ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+        [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])])];
+    const tab = tabs.find(node =>
       node.textContent?.trim() === ${JSON.stringify(label)} &&
       node.getAttribute('aria-disabled') !== 'true' && node.getClientRects().length
     );
@@ -13,7 +16,9 @@ async function openTab(page, label) {
   })()`, { timeoutMs: 5000 });
   if (!target.ok) throw new Error(`找不到可点击的「${label}」页签`);
   await cdpClickPoint(page, target.value.x, target.value.y);
-  const selected = await page.waitFor(`[...document.querySelectorAll('[role="tab"][aria-selected="true"]')]
+  const selected = await page.waitFor(`[...document.querySelectorAll('[role="tab"][aria-selected="true"]'),
+    ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+      [...(host.shadowRoot?.querySelectorAll('[aria-selected="true"]') || [])])]
     .some(node => node.textContent?.trim() === ${JSON.stringify(label)} && node.getClientRects().length)`,
   { timeoutMs: 5000 });
   if (!selected.ok) throw new Error(`点击后未选中「${label}」`);
@@ -32,9 +37,10 @@ export async function run(t, page, cfg) {
     const destination = `/context/domains/${encodeURIComponent(domainId)}/detail`;
     const result = await page.gotoContext(destination, {
       stepName: step,
-      readyFn: () => [...document.querySelectorAll('[role="tab"]')].some(
-        node => node.textContent?.trim() === '权限管控'
-      ) && Boolean(document.body?.innerText.includes('codex-e2e-r4-domain-1125')),
+      readyFn: () => Boolean(document.querySelector('article h1')?.innerText === 'codex-e2e-r4-domain-1125') &&
+        [...document.querySelectorAll('ve-tabs ve-tab-pane')].some(
+          node => node.getAttribute('title') === '权限管控'
+        ),
     });
     if (!result.settledOk) throw new Error(`对照领域「${domainName}」的权限入口未就绪`);
 

@@ -352,7 +352,11 @@ export async function run(t, page, cfg) {
             if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
             const txt = document.body?.innerText || '';
             if (/业务领域不存在或已删除/.test(txt)) return 'NOT_FOUND';
-            const tabs = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')];
+            const tabs = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ];
             return tabs.length >= 5 ? 'READY' : false;
           },
         }
@@ -382,7 +386,11 @@ export async function run(t, page, cfg) {
       }
 
       const tabs = await page.evalJSON(() =>
-        [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')]
+        [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ]
           .map(el => {
             const r = el.getBoundingClientRect();
             return {
@@ -395,7 +403,7 @@ export async function run(t, page, cfg) {
           })
           .filter(t => t.width > 0 && t.height > 0)
       );
-      assertOrderedBoxes(tabs, ['工具配置', '知识模型', '知识页', '权限管控', '版本与记录'], {
+      assertOrderedBoxes(tabs, ['领域知识', '加工任务', '知识模型', 'MCP 服务', '工具配置', '权限管控'], {
         axis: 'x',
         contextLabel: '领域详情五页签',
       });
@@ -411,7 +419,7 @@ export async function run(t, page, cfg) {
       if (!detailLoadedOk) {
         t.block(
           '已发布版本快照抽屉展示真实冻结条目或资产范围明细（非空明细提示）',
-          `前置领域详情 ${primaryDomainId} 未就绪，无法进入版本与记录页签`
+          `前置领域详情 ${primaryDomainId} 未就绪，无法进入MCP 服务页签`
         );
         return;
       }
@@ -420,15 +428,19 @@ export async function run(t, page, cfg) {
       page.setStep(step);
 
       const tabBox = await page.evalJSON(() => {
-        const el = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].find(
-          node => (node.textContent || '').trim() === '版本与记录'
+        const el = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(
+          node => (node.textContent || '').trim() === 'MCP 服务'
         );
         if (!el) return null;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
       });
       if (!tabBox) {
-        throw new Error('领域详情缺少可点击的「版本与记录」页签入口');
+        throw new Error('领域详情缺少可点击的「MCP 服务」页签入口');
       }
 
       await cdpClickPoint(page, tabBox.x, tabBox.y);
@@ -449,15 +461,15 @@ export async function run(t, page, cfg) {
 
       const oracleAfterList = await page.collectStepOracle(step);
       validateStepTerminalState(oracleAfterList, cfg, {
-        stepLabel: '版本与记录列表加载',
+        stepLabel: 'MCP 服务列表加载',
         forbidWrite: true,
       });
 
       if (!versionsReady.ok || !versionsReady.value) {
-        throw new Error('切换「版本与记录」后版本列表超时未收敛');
+        throw new Error('切换「MCP 服务」后版本列表超时未收敛');
       }
       if (versionsReady.value.loadError) {
-        throw new Error('「版本与记录」展示「无法加载发布版本」错误提示');
+        throw new Error('「MCP 服务」展示「无法加载发布版本」错误提示');
       }
 
       const releaseRows = versionsReady.value.rows.filter(
@@ -524,8 +536,12 @@ export async function run(t, page, cfg) {
       }
 
       const headerAndTab = await page.evalJSON(() => {
-        const tab = [...document.querySelectorAll('[role="tab"], .arco-tabs-header-title')].find(
-          el => (el.textContent || '').trim() === '版本与记录'
+        const tab = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(
+          el => (el.textContent || '').trim() === 'MCP 服务'
         );
         const r = tab?.getBoundingClientRect();
         const headerEl =
@@ -537,7 +553,7 @@ export async function run(t, page, cfg) {
         };
       });
       if (!headerAndTab?.tabPos) {
-        throw new Error(`对照领域 ${domainName} 缺少「版本与记录」页签入口`);
+        throw new Error(`对照领域 ${domainName} 缺少「MCP 服务」页签入口`);
       }
 
       await cdpClickPoint(page, headerAndTab.tabPos.x, headerAndTab.tabPos.y);

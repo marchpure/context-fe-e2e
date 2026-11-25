@@ -1,6 +1,6 @@
 // 模块 08：P0 草稿调试端到端旅程
 // 旅程覆盖：
-// 1. 只读阶段一：从合成测试领域（codex-e2e-*）详情进入「版本与记录」，核验独立草稿行（「草稿 / 待发布」）暴露可用「调试」按钮。
+// 1. 只读阶段一：从合成测试领域（codex-e2e-*）详情进入「MCP 服务」，核验独立草稿行（「草稿 / 待发布」）暴露可用「调试」按钮。
 // 2. 只读阶段二：沿真实鼠标点击草稿行「调试」进入工作台调试台，核验 workspaceId / project / draftDomainId 及领域选择器锁定同一具体草稿（不串入已发布版本）。
 // 3. 门禁发送阶段三：仅当 CONTEXT_E2E_RUN_DRAFT_QUERY=1 且 CONTEXT_E2E_DRAFT_DOMAIN_ID、CONTEXT_E2E_DRAFT_DOMAIN_NAME（codex-e2e-*）、
 //    CONTEXT_E2E_DRAFT_EXPECTED_ASSET 全部明确配置时，在真实编辑器单次输入并提交「你有哪些数据」，预算 <= 120s 等待终态回答或错误；
@@ -14,7 +14,7 @@ export const DRAFT_DEBUG_QUESTION = '你有哪些数据';
 export const MAX_DRAFT_DEBUG_BUDGET_MS = 120_000;
 
 export const STAGE_TITLES = {
-  entry: '合成测试领域详情「版本与记录」独立草稿行暴露可用「调试」按钮',
+  entry: '合成测试领域详情「MCP 服务」独立草稿行暴露可用「调试」按钮',
   workbenchLock: '从独立草稿行点击「调试」进入工作台并锁定同一具体草稿（不串选已发布版本）',
   queryAnswer: '在工作台编辑器提交「你有哪些数据」并返回命中预期合成资产的真实草稿回答',
 };
@@ -271,7 +271,7 @@ export function verifyWorkbenchDraftBinding({
       : '';
     return {
       ok: false,
-      reason: `同一草稿在「版本与记录」具备「调试」入口，但工作台拒绝识别该草稿：提示「${draftUnavailableNotice}」，领域选择器="${selectedLabel || placeholder || '空'}"${listDiag ? `，${listDiag}` : ''}`,
+      reason: `同一草稿在「MCP 服务」具备「调试」入口，但工作台拒绝识别该草稿：提示「${draftUnavailableNotice}」，领域选择器="${selectedLabel || placeholder || '空'}"${listDiag ? `，${listDiag}` : ''}`,
     };
   }
 
@@ -1236,7 +1236,7 @@ export async function run(t, page, cfg = {}) {
       resolvedDomainName = candidate.name;
     }
 
-    // ==================== 阶段一：领域详情 -> 版本与记录 -> 独立草稿行「调试」按钮（只读） ====================
+    // ==================== 阶段一：领域详情 -> MCP 服务 -> 独立草稿行「调试」按钮（只读） ====================
     await t.check(STAGE_TITLES.entry, async () => {
       const step = '08-domain-versions-draft-row';
       const detailSubpath = `/context/domains/${encodeURIComponent(resolvedDomainId)}/detail`;
@@ -1249,10 +1249,10 @@ export async function run(t, page, cfg = {}) {
             const txt = document.body?.innerText || '';
             if (/业务领域不存在或已删除/.test(txt)) return 'NOT_FOUND';
             const headerEl = document.querySelector(
-              '.c-m-detail-header-title, [class*="detail-header-title"], h1'
+              'article h1'
             );
             const title = headerEl ? (headerEl.textContent || '').trim() : '';
-            return title && title !== '—' && /版本与记录|工具配置/.test(txt) ? title : false;
+            return title && title !== '—' && /MCP 服务|工具配置/.test(txt) ? title : false;
           },
         });
         if (!nav.settledOk) {
@@ -1265,10 +1265,10 @@ export async function run(t, page, cfg = {}) {
             const txt = document.body?.innerText || '';
             if (/业务领域不存在或已删除/.test(txt)) return 'NOT_FOUND';
             const headerEl = document.querySelector(
-              '.c-m-detail-header-title, [class*="detail-header-title"], h1'
+              'article h1'
             );
             const title = headerEl ? (headerEl.textContent || '').trim() : '';
-            return title && title !== '—' && /版本与记录|工具配置/.test(txt) ? title : false;
+            return title && title !== '—' && /MCP 服务|工具配置/.test(txt) ? title : false;
           },
           { timeoutMs: Math.min(15_000, remainingMs()), intervalMs: 250 }
         );
@@ -1289,12 +1289,14 @@ export async function run(t, page, cfg = {}) {
         const txt = document.body?.innerText || '';
         const notFound = /业务领域不存在或已删除/.test(txt);
         const titleEl = document.querySelector(
-          '.c-m-detail-header-title, [class*="detail-header-title"], h1'
+          'article h1'
         );
         const title = titleEl ? (titleEl.textContent || '').trim() : '';
-        const verTab = Array.from(
-          document.querySelectorAll('[role="tab"], .arco-tabs-header-title')
-        ).find(node => (node.textContent || '').trim() === '版本与记录');
+        const verTab = [
+          ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+          ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+            [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]),
+        ].find(node => (node.textContent || '').trim() === 'MCP 服务');
         const rect = verTab ? verTab.getBoundingClientRect() : null;
         return {
           notFound,
@@ -1331,11 +1333,11 @@ export async function run(t, page, cfg = {}) {
       resolvedDomainName = actualTitle;
 
       if (!detailHeader.versionsTabRect) {
-        throw new Error(`领域「${resolvedDomainName}」详情页未渲染「版本与记录」页签`);
+        throw new Error(`领域「${resolvedDomainName}」详情页未渲染「MCP 服务」页签`);
       }
 
-      // 真实鼠标点击「版本与记录」页签
-      await cdpClickRect(page, detailHeader.versionsTabRect, '版本与记录页签');
+      // 真实鼠标点击「MCP 服务」页签
+      await cdpClickRect(page, detailHeader.versionsTabRect, 'MCP 服务页签');
 
       const versionsReady = await page.waitFor(
         () => {
@@ -1356,7 +1358,7 @@ export async function run(t, page, cfg = {}) {
       );
 
       if (!versionsReady.ok) {
-        throw new Error(`切换「版本与记录」后领域版本表格加载超时`);
+        throw new Error(`切换「MCP 服务」后领域版本表格加载超时`);
       }
 
       const tableInspection = await page.evalJSON(() => {
@@ -1403,7 +1405,7 @@ export async function run(t, page, cfg = {}) {
       if (!tableInspection.draftRow) {
         const diag = inspector.state.latestGetDomain;
         throw new Error(
-          `领域「${resolvedDomainName}」(${resolvedDomainId}) 的「版本与记录」不存在独立草稿行（rowCount=${tableInspection.rowCount}, releases=[${releaseVersions.join(', ')}]${
+          `领域「${resolvedDomainName}」(${resolvedDomainId}) 的「MCP 服务」不存在独立草稿行（rowCount=${tableInspection.rowCount}, releases=[${releaseVersions.join(', ')}]${
             diag
               ? `, HasDraftChanges=${diag.hasDraftChanges}, DraftRevision=${diag.draftRevision}`
               : ''

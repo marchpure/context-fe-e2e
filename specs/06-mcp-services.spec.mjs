@@ -13,7 +13,8 @@ import {
 
 async function applyMcpKeywordSearch(page, keyword) {
   const inputBox = await page.evalJSON(() => {
-    const input = document.querySelector('input[placeholder="搜索服务名称、ID 或业务领域"]');
+    const control = document.querySelector('[aria-label="搜索 MCP 服务"]');
+    const input = control?.matches('input') ? control : control?.shadowRoot?.querySelector('input');
     if (!input) return null;
     const r = input.getBoundingClientRect();
     return r.width > 0 && r.height > 0
@@ -26,7 +27,8 @@ async function applyMcpKeywordSearch(page, keyword) {
 
   await cdpClickPoint(page, inputBox.x, inputBox.y);
   await page.evalJSON(`(() => {
-    const input = document.querySelector('input[placeholder="搜索服务名称、ID 或业务领域"]');
+    const control = document.querySelector('[aria-label="搜索 MCP 服务"]');
+    const input = control?.matches('input') ? control : control?.shadowRoot?.querySelector('input');
     if (!input) return;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
       input,
@@ -37,21 +39,13 @@ async function applyMcpKeywordSearch(page, keyword) {
   })()`);
   await cdpPressKey(page, 'Enter', 'Enter', 13);
 
-  // 若 CSimpleSearch 存在搜索图标按钮则一并触发点击确保 CTable.fetcher 刷新
-  const searchBtn = await page.evalJSON(() => {
-    const btn = document.querySelector('.arco-input-search-btn');
-    if (!btn) return null;
-    const r = btn.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
-  });
-  if (searchBtn) {
-    await cdpClickPoint(page, searchBtn.x, searchBtn.y);
-  }
+
 }
 
 async function readMcpTableState(page) {
   return page.evalJSON(() => {
-    const table = document.querySelector('.arco-table');
+    const host = document.querySelector('ve-table.ak-data-table');
+    const table = host?.shadowRoot?.querySelector('table');
     if (!table) return { hasTable: false, headers: [], rows: [], emptyText: '' };
 
     const seenHeaders = new Set();
@@ -67,18 +61,15 @@ async function readMcpTableState(page) {
         return true;
       });
 
-    // 排除 Arco fixed-right 克隆表体的重复行，只读主表体 .arco-table-body 或首个 tbody
-    const mainBody =
-      table.querySelector('.arco-table-content-inner tbody') ||
-      table.querySelector('tbody');
+    const mainBody = table.querySelector('tbody');
     const trs = mainBody ? [...mainBody.querySelectorAll('tr')] : [];
-    const emptyEl = table.querySelector('.arco-empty');
+    const emptyText = host.closest('section')?.innerText || table.innerText;
     const rows = trs
-      .filter(tr => !tr.querySelector('.arco-empty'))
+      .filter(tr => tr.cells.length === headers.length)
       .map(tr => {
         const r = tr.getBoundingClientRect();
         const tds = [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim());
-        const metricsBtn = [...tr.querySelectorAll('td button, td a')].find(
+        const metricsBtn = [...tr.querySelectorAll('td button, td ve-button, td a')].find(
           el => (el.textContent || '').trim() === '查看'
         );
         const mr = metricsBtn?.getBoundingClientRect();
@@ -88,9 +79,10 @@ async function readMcpTableState(page) {
           nameAndId: tds[0] || '',
           status: tds[1] || '',
           domainName: tds[2] || '',
-          version: tds[3] || '',
-          gateway: tds[4] || '',
-          registry: tds[5] || '',
+          workspace: tds[3] || '',
+          version: tds[4] || '',
+          gateway: tds[5] || '',
+          registry: tds[6] || '',
           metricsBtnPos:
             metricsBtn && mr && mr.width > 0 ? { x: mr.x + mr.width / 2, y: mr.y + mr.height / 2 } : null,
         };
@@ -101,7 +93,7 @@ async function readMcpTableState(page) {
       hasTable: true,
       headers,
       rows,
-      emptyText: (emptyEl?.innerText || '').trim(),
+      emptyText: emptyText.trim(),
     };
   });
 }
@@ -137,7 +129,7 @@ export async function run(t, page, cfg) {
         readyFn: () => {
           if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
           return Boolean(
-            document.querySelector('.arco-table') ||
+            document.querySelector('ve-table.ak-data-table') ||
               document.querySelector('.arco-alert') ||
               /加载失败/.test(document.body?.innerText || '')
           );
@@ -179,11 +171,11 @@ export async function run(t, page, cfg) {
 
       const tableState = await readMcpTableState(page);
       if (!tableState.hasTable) {
-        throw new Error('MCP 服务管理页未挂载 .arco-table 表格组件');
+        throw new Error('MCP 服务管理页未挂载 MCP 服务表格');
       }
       assertOrderedBoxes(
         tableState.headers,
-        ['服务名称 / ID', '服务状态', '业务领域', '发布版本', '关联网关', '资产中心', '调用统计'],
+        ['服务名称 / ID', '服务状态', '业务领域', '所属空间', '发布版本', '关联网关', '资产中心', '操作'],
         { axis: 'x', minWidth: 40, minHeight: 16, contextLabel: 'MCP 服务表头' }
       );
 
@@ -232,19 +224,19 @@ export async function run(t, page, cfg) {
         initialRows[0];
       const targetKeyword = preferredRow.domainName;
 
-      // 1. 搜索不存在的关键词 -> 必须显示「没有符合条件的服务」且 0 行数据
+      // 1. 搜索不存在的关键词 -> 必须显示「请调整搜索或筛选条件」且 0 行数据
       await applyMcpKeywordSearch(page, '__nonexistent_mcp_e2e_99999__');
       const emptyFiltered = await waitForTerminalDom(
         page,
         () => {
-          const table = document.querySelector('.arco-table');
+          const table = document.querySelector('ve-table.ak-data-table');
           if (!table) return false;
-          return /没有符合条件的服务/.test(table.innerText || '');
+          return /请调整搜索或筛选条件/.test(table.closest('section')?.innerText || table.shadowRoot?.textContent || '');
         },
         { timeoutMs: 8000, settleMs: 150 }
       );
       if (!emptyFiltered.ok) {
-        throw new Error('输入不存在的服务关键词后，表格未过滤为空态「没有符合条件的服务」');
+        throw new Error('输入不存在的服务关键词后，表格未过滤为空态「请调整搜索或筛选条件」');
       }
 
       // 2. 搜索真实已发布领域名 -> 必须只展示匹配行
@@ -253,9 +245,9 @@ export async function run(t, page, cfg) {
         page,
         `(() => {
           const kw = ${JSON.stringify(targetKeyword.toLowerCase())};
-          const table = document.querySelector('.arco-table');
+          const table = document.querySelector('ve-table.ak-data-table');
           const body = table?.querySelector('.arco-table-content-inner tbody') || table?.querySelector('tbody');
-          const rows = body ? [...body.querySelectorAll('tr')].filter(tr => !tr.querySelector('.arco-empty')) : [];
+          const rows = body ? [...body.querySelectorAll('tr')].filter(tr => tr.cells.length === headers.length) : [];
           if (rows.length === 0) return false;
           const allMatch = rows.every(tr => (tr.innerText || '').toLowerCase().includes(kw));
           return allMatch ? rows.length : false;
@@ -272,9 +264,9 @@ export async function run(t, page, cfg) {
         page,
         `(() => {
           const expectedMin = ${initialRows.length};
-          const table = document.querySelector('.arco-table');
+          const table = document.querySelector('ve-table.ak-data-table');
           const body = table?.querySelector('.arco-table-content-inner tbody') || table?.querySelector('tbody');
-          const rows = body ? [...body.querySelectorAll('tr')].filter(tr => !tr.querySelector('.arco-empty')) : [];
+          const rows = body ? [...body.querySelectorAll('tr')].filter(tr => tr.cells.length === headers.length) : [];
           return rows.length >= expectedMin ? rows.length : false;
         })()`,
         { timeoutMs: 8000, settleMs: 150 }

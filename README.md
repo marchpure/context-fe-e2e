@@ -28,7 +28,7 @@ node --test test/*.test.mjs
 
 ## 环境
 
-默认目标 STG 工作区 `800e2e0a-bb05-4591-8cd2-f8df54be0ebe`、项目 `default`、前端小流量 `deploy_context_stg_7399178560`、后端泳道 `7399178560`。隔离环境参数为 `CONTEXT_CONSOLE_BASE`、`CONTEXT_WORKSPACE_ID`、`CONTEXT_PROJECT_NAME`、`FE_GRAY_HEADER`、`LANE_ENV`、`CDP_HTTP_BASE`。浏览器端口限本机。
+默认目标为 STG 测试工作区 `800e2e0a-bb05-4591-8cd2-f8df54be0ebe`、项目 `default`、前端小流量 `feat_M_7387129035_agentkit_context` 和后端泳道 `7399178560`。默认 STG 配置在执行业务用例前核对目录入口实际加载的静态资源版本 `1.0.0.2257`。对照其他产物时可用 `CONTEXT_E2E_EXPECTED_FE_VERSION` 指定版本。隔离环境参数为 `CONTEXT_CONSOLE_BASE`、`CONTEXT_WORKSPACE_ID`、`CONTEXT_PROJECT_NAME`、`FE_GRAY_HEADER`、`LANE_ENV`、`CDP_HTTP_BASE`。浏览器端口限本机。
 
 需要提交问答、创建对象、扫描、审核、发布或删除的用例使用受控合成对象。执行前确认样本与清理边界。每条用例保留实际通过、失败、待执行或缺前置条件的状态。
 
