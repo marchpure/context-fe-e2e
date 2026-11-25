@@ -57,10 +57,10 @@ async function main() {
         } catch (error) {
           t.block('模块执行中断', error?.message || String(error));
         }
-        const forbidden = page.scopeViolations.slice(blockedScopeCount);
-        if (forbidden.length) {
+        const scopeViolations = page.scopeViolations.slice(blockedScopeCount);
+        if (scopeViolations.length) {
           t.record('请求保持在安全测试范围内', 'REGRESSION_FAIL',
-            `命中禁区工作区，拦截请求 ${forbidden.map(item => item.action).join('、')}`);
+            `拦截偏离测试范围的请求 ${scopeViolations.map(item => item.action).join('、')}`);
         }
         allResults.push(...t.results);
       }
