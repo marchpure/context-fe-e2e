@@ -396,12 +396,9 @@ test('knownBug symptom classification strictly distinguishes registered symptoms
   // 1. Exact registered symptoms must map to KNOWN_BUG
   const symptomCases = [
     ['CTX-001', 'MCP 管理列表触发 localeCompare TypeError: Cannot read properties of undefined (reading localeCompare)'],
-    ['CTX-002', '禁用或未配置的评测仍渲染评测命中率 0%'],
     ['CTX-006', '未成功重定向至资产详情: href=https://console.volcengine.com/v2/context/connections/res-1/detail，仍停留在旧连接路由'],
-    ['CTX-011', 'Markdown 文档引用「doc-codex-e2e-1125-refund.md」被误标为「数据表」'],
     ['CTX-012', '首次发布弹窗第一步仍展示网关/服务名/认证可编辑项（冗余网关/认证编辑项）'],
     ['CTX-013', '工作台首屏渲染耗时超标: 实测=8420ms (红线 <= 5000ms)'],
-    ['CTX-014', '版本 1.0.1 冻结范围明细为空（抽屉显示「暂未提供此版本的发布范围明细」或无冻结条目）'],
     ['CTX-021', '24h 调用统计状态为 UNAVAILABLE（抽屉显示「暂时无法获取调用统计。」）'],
   ];
 
@@ -419,9 +416,7 @@ test('knownBug symptom classification strictly distinguishes registered symptoms
 
   // 2. Missing entry / unexpected failure in checkKnownBug must NEVER be masked as KNOWN_BUG or PASS
   const regressionCases = [
-    ['CTX-014', '领域详情缺少可点击的「版本与记录」页签入口'],
     ['CTX-021', 'MCP 服务列表「调用统计」列缺少可点击的「查看」按钮'],
-    ['CTX-011', '建议审核抽屉未渲染「来源依据」区块'],
     ['CTX-013', '工作台首屏展示「无法读取工作台数据，请重试。」错误态'],
     ['CTX-001', 'MCP 服务管理页出现错误提示（非异常排序）'],
   ];
@@ -440,7 +435,7 @@ test('knownBug symptom classification strictly distinguishes registered symptoms
 
   // 3. t.block inside check / checkKnownBug records BLOCKED rather than PASS or FIXED_CANDIDATE
   const tBlock = new TestContext(fakePage, 'block-check.spec.mjs');
-  await tBlock.checkKnownBug('CTX-014', '缺少前置版本', async () => {
+  await tBlock.checkKnownBug('CTX-006', '缺少前置版本', async () => {
     tBlock.block('缺少前置版本', '当前领域无已发布版本');
   });
   assert.equal(tBlock.results.length, 1);

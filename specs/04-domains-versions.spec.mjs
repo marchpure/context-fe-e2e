@@ -54,7 +54,7 @@ async function closeOpenModal(page) {
   });
 }
 
-async function readVersionDrawerSnapshot(page, versionStr, refundEntryId) {
+export async function readVersionDrawerSnapshot(page, versionStr, refundEntryId) {
   const verBtn = await page.evalJSON(`(() => {
     const target = ${JSON.stringify(versionStr)};
     const btn = [...document.querySelectorAll('table tbody button, table tbody a')].find(
@@ -405,8 +405,7 @@ export async function run(t, page, cfg) {
     }
   );
 
-  await t.checkKnownBug(
-    'CTX-014',
+  await t.check(
     '已发布版本快照抽屉展示真实冻结条目或资产范围明细（非空明细提示）',
     async () => {
       if (!detailLoadedOk) {

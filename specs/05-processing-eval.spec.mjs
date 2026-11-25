@@ -559,8 +559,7 @@ export async function run(t, page, cfg) {
     }
   );
 
-  await t.checkKnownBug(
-    'CTX-011',
+  await t.check(
     '建议抽屉「来源依据」正确标注 Markdown 文档类型并具备「查看资产 ↗」有效跳转',
     async () => {
       const step = '05-proposal-citations-link';
@@ -781,8 +780,7 @@ export async function run(t, page, cfg) {
     }
   );
 
-  await t.checkKnownBug(
-    'CTX-002',
+  await t.check(
     '未启用或未配置评测集的加工报告与通过/失败态严格分离且不误渲染 0% 命中率',
     async () => {
       if (!isBaselineWs) {

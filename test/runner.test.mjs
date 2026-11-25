@@ -19,7 +19,7 @@ test('已知问题只匹配已登记的故障表现', async () => {
     throw new Error('TypeError: Cannot read properties of undefined (reading localeCompare)');
   });
   assert.deepEqual(context.results.map(row => row.status), [
-    'KNOWN_BUG', 'REGRESSION_FAIL', 'REGRESSION_FAIL', 'KNOWN_BUG',
+    'REGRESSION_FAIL', 'REGRESSION_FAIL', 'REGRESSION_FAIL', 'KNOWN_BUG',
   ]);
   assert.equal(gateExitCode(context.results), 1);
 });

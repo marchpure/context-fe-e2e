@@ -1,3 +1,4 @@
+import { assertCatalogReadBudget } from '../lib/regression-checks.mjs';
 // 模块 02：资产目录（/context/catalog）端到端真机只读回归套件
 // 覆盖：
 // 1. 冷启动慢列表完整收敛（禁止凭标题/导航/按钮/在途请求假绿）与树计数一致性
@@ -154,10 +155,7 @@ export async function run(t, page, cfg) {
     }
 
     const coldLoadMs = Date.now() - navStart;
-    const budgetMs = cfg.slo.pageFirstContentMaxMs;
-    if (coldLoadMs > budgetMs) {
-      throw new Error(`CAT-01 所有资产冷打开耗时 ${coldLoadMs}ms，超过 ${budgetMs}ms`);
-    }
+    const readEvidence = assertCatalogReadBudget(oracle, cfg, coldLoadMs);
     coldSnapshot = settled.snapshot;
     const countCheck = verifyTreeAndOverviewCounts(coldSnapshot);
     if (!countCheck.ok) {
@@ -174,13 +172,13 @@ export async function run(t, page, cfg) {
       return `空工作区明确渲染空态 (${settled.verdict.reason}), totalMs=${Date.now() - navStart}ms`;
     }
 
-    return `settled=${Date.now() - navStart}ms, treeTotal=${countCheck.total}, overviewRows=${settled.verdict.overviewRowCount}, assetRows=${settled.verdict.assetRowCount}, APIs=${oracle.records.length}`;
+    return `settled=${Date.now() - navStart}ms, treeTotal=${countCheck.total}, overviewRows=${settled.verdict.overviewRowCount}, assetRows=${settled.verdict.assetRowCount}, APIs=${oracle.records.length}, ListContextEntries=${readEvidence}`;
   });
 
   // -------------------------------------------------------------------------
   // 2. 时间戳守卫（CTX-007）
   // -------------------------------------------------------------------------
-  await t.checkKnownBug('CTX-007', '资产目录列表更新时间格式有效且不出现 1970-01-01 零值时间戳', async () => {
+  await t.check('资产目录列表更新时间格式有效且不出现 1970-01-01 零值时间戳', async () => {
     const oracle = await page.collectStepOracle('02-catalog-cold-open');
     if (oracle.has1970Timestamp) {
       throw new Error('资产目录可见文本中存在 1970-01-01 零值更新时间');
@@ -253,6 +251,8 @@ export async function run(t, page, cfg) {
       }
 
       // Step B: 用真实鼠标点击左侧目录树顶层「所有资产单元」（对应用户所述「所有资产」当前真实 UI 名称）
+      const allStep = '02-source-to-all-read';
+      page.setStep(allStep);
       const allClickStarted = Date.now();
       await dispatchRealMouseClick(
         page,
@@ -272,10 +272,9 @@ export async function run(t, page, cfg) {
       }
 
       const clickToAssetsMs = Date.now() - allClickStarted;
-      const budgetMs = cfg.slo.pageFirstContentMaxMs;
-      if (clickToAssetsMs > budgetMs) {
-        throw new Error(`CAT-02 点击所有资产后列表耗时 ${clickToAssetsMs}ms，超过 ${budgetMs}ms`);
-      }
+      const allOracle = await page.collectStepOracle(allStep);
+      assertCatalogReadBudget(allOracle, cfg, clickToAssetsMs);
+      page.setStep(step);
 
       // Step C: 从转换后的「所有资产单元」汇总表用真实鼠标点进该连接
       if (!(allSettled.snapshot.overviewRows || []).some(row => row.name === fixtureName)) {
