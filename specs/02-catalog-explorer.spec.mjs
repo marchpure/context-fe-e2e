@@ -961,8 +961,9 @@ export async function run(t, page, cfg) {
       const modalReady = await page.waitFor(() => {
         const dialog = document.querySelector('.arco-modal');
         const text = dialog?.innerText || '';
-        return ['在线来源', '数据库', '引用已有知识库', '外部 OpenViking', '飞书文档']
-          .every(label => text.includes(label)) ? text : false;
+        return dialog?.getClientRects().length && !dialog.querySelector('.arco-spin-loading') && text.trim()
+          ? text
+          : false;
       }, { timeoutMs: 8000, intervalMs: 120 });
       if (!modalReady.ok) throw new Error('在线来源选择区未到完整表单终态');
       const combinedModalText = modalReady.value;
@@ -982,10 +983,22 @@ export async function run(t, page, cfg) {
       const oracle = await page.collectStepOracle(step);
       assertStepOracleHealthy(oracle);
 
-      if (/Meego|风神|Aeolus/i.test(combinedModalText)) {
+      if (/(?:^|\s)业务应用(?:\s|$)|Meego|风神|Aeolus/i.test(combinedModalText)) {
         throw new Error('新建连接向导仍暴露 Meego / 风神入口卡片');
       }
-      return '连接数据向导已核验无 Meego / 风神死入口残留';
+      for (const [label, pattern] of [
+        ['数据库', /数据库/],
+        ['引用已有知识库', /引用已有知识库/],
+        ['外部 OpenViking', /OpenViking/],
+        ['飞书', /飞书/],
+        ['火山 TOS', /(?:火山\s*)?TOS/],
+        ['代码仓', /代码仓/],
+      ]) {
+        if (!pattern.test(combinedModalText)) {
+          throw new Error(`接入在线来源第 1 步缺少可用数据源入口：${label}`);
+        }
+      }
+      return '接入在线来源已完整展示 6 类可用来源且无 Meego / 风神死入口残留';
     }
   );
 }

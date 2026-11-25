@@ -151,6 +151,29 @@ export async function run(t, page, cfg) {
       await open(page, chat, '11-citation-session-' + key);
       const answer = await wait(page, answerState, '同一消息中的真实回答');
       const source = await wait(page, 'document.querySelector(' + q(cardSelector) + ')?.innerText', '冻结引文卡片');
+      // 1) 先用真实鼠标点击消息内联引文卡片，验证「资产预览」侧栏直接按本轮固定发布修订展示原文
+      await dispatchRealMouseClick(
+        page,
+        '(() => { const card = document.querySelector(' + q(cardSelector) + '); return card?.querySelector("button, a, [role=\\"button\\"]") || card; })()',
+        '历史回答内联引文卡片'
+      );
+      const inlinePreview = await wait(
+        page,
+        '(() => { const panel = document.querySelector(".arco-drawer, [aria-label=\\"资产预览\\"]"); ' +
+          'if (!panel || panel.querySelector(".arco-spin-loading")) return false; ' +
+          'const txt = (panel.innerText || "").trim(); return /(?:7|15)\\s*天/.test(txt) ? txt : false; })()',
+        '内联引文侧栏预览原文'
+      );
+      const closePreviewBtn = await page.evalJSON(
+        '(() => { const btn = document.querySelector(".arco-drawer .arco-drawer-close-icon, [aria-label=\\"资产预览\\"] button[aria-label*=\\"关闭\\"]"); ' +
+          'if (!btn) return null; const r = btn.getBoundingClientRect(); return r.width > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; })()'
+      );
+      if (closePreviewBtn) {
+        await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...closePreviewBtn });
+        await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...closePreviewBtn });
+        await page.sleep(200);
+      }
+      // 2) 再从同一回答点击「查看图谱 → 目标节点 → 打开详情 → 返回资源列表」核对完整往返
       await dispatchRealMouseClick(page, '(() => [...((' + messageExpr + ')?.querySelectorAll("button") || [])]' +
         '.find(button => button.innerText.trim() === "查看图谱"))()', '同一回答的查看图谱');
       const graph = '[aria-label="检索图谱"]';
@@ -167,9 +190,9 @@ export async function run(t, page, cfg) {
       await click(page, '返回资源列表', { within: 'article[aria-label="发布版本资产详情"]' });
       const returned = await wait(page, answerState, '原会话恢复');
       const back = await oracle(page, cfg, '11-citation-return-' + key);
-      assertPinnedCitation({ answer, source, href: before.href, detail,
+      assertPinnedCitation({ answer, source, inlinePreview, href: before.href, detail,
         returned: { href: back.href, answer: returned } }, cfg, { ...data, ...pin, version, days });
-      return '冻结原文与原会话一致，' + days + ' 天';
+      return '内联预览、图谱冻结原文与原会话一致，' + days + ' 天';
     });
   }
 

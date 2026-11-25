@@ -13,8 +13,14 @@ function paginationState() {
       table: [...row.cells].some(cell => cell.innerText.trim() === '数据表'),
     }));
   const current = nav?.querySelector('[aria-live="polite"]')?.textContent?.trim() || '第 1 页';
+  const prev = [...(nav?.querySelectorAll('button') || [])].find(button => button.textContent.trim() === '上一页');
   const next = [...(nav?.querySelectorAll('button') || [])].find(button => button.textContent.trim() === '下一页');
-  return { rows, current, nextEnabled: Boolean(next && !next.disabled && next.getClientRects().length) };
+  return {
+    rows,
+    current,
+    prevEnabled: Boolean(prev && !prev.disabled && prev.getAttribute('aria-disabled') !== 'true' && prev.getClientRects().length),
+    nextEnabled: Boolean(next && !next.disabled && next.getAttribute('aria-disabled') !== 'true' && next.getClientRects().length),
+  };
 }
 
 async function observePage(page, cfg, step, started, pageNumber) {
@@ -39,14 +45,18 @@ async function observePage(page, cfg, step, started, pageNumber) {
 }
 
 export async function run(t, page, cfg) {
-  await t.check('CAT-04/12 数据表筛选和实际翻页保持 EntryType、游标及范围', async () => {
+  await t.check('CAT-04/12 数据表筛选、下一页与上一页往返保持 EntryType、游标、不重叠行集及范围', async () => {
     const firstStep = '12-tables-first';
     const nextStep = '12-tables-next';
+    const prevStep = '12-tables-prev';
     const started = Date.now();
     const nav = await page.gotoContext('/context/catalog?assetType=Table', { stepName: firstStep, timeoutMs: 5000 });
     if (!nav.settledOk) throw new Error('按数据表筛选的知识管理地址未就绪');
     const first = await observePage(page, cfg, firstStep, started, 1);
     assertScopedRoute(first.oracle.href, cfg, '/context/catalog', { assetType: 'Table' });
+    if (first.prevEnabled) {
+      throw new Error('第 1 页「上一页」按钮不应处于可点击状态');
+    }
     if (first.records[0].listEntriesRequest.nextTokens.some(Boolean)) {
       throw new Error('新筛选的首个请求沿用了其他页的 NextToken');
     }
@@ -65,6 +75,20 @@ export async function run(t, page, cfg) {
     assertScopedRoute(next.oracle.href, cfg, '/context/catalog', { assetType: 'Table', page: '2' });
     assertListEntriesContinuation(lastFirst, next.records[0]);
     if (next.rows.some(id => first.rows.includes(id))) throw new Error('相邻两页出现重复资产');
-    return `第 1 页 ${first.rows.length} 项，第 2 页 ${next.rows.length} 项，${first.evidence}；${next.evidence}`;
+    if (!next.prevEnabled) {
+      throw new Error('进入第 2 页后「上一页」按钮仍处于禁用态，无法回翻');
+    }
+
+    const prevStarted = Date.now();
+    page.setStep(prevStep);
+    await dispatchRealMouseClick(page, `Array.from(document.querySelectorAll(
+      'nav[aria-label="资产列表分页"] button:not([disabled])'
+    )).find(button => button.textContent.trim() === '上一页')`, '上一页');
+    const backToFirst = await observePage(page, cfg, prevStep, prevStarted, 1);
+    assertScopedRoute(backToFirst.oracle.href, cfg, '/context/catalog', { assetType: 'Table' });
+    if (JSON.stringify(backToFirst.rows) !== JSON.stringify(first.rows)) {
+      throw new Error('点击「上一页」返回第 1 页后展示的资产行集与首屏不一致');
+    }
+    return `第 1 页 ${first.rows.length} 项 → 第 2 页 ${next.rows.length} 项 → 上一页恢复一致，${first.evidence}；${next.evidence}`;
   });
 }

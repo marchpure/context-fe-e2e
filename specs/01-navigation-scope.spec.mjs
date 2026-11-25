@@ -9,6 +9,7 @@ import {
   validateStepTerminalState,
   waitForTerminalDom,
 } from '../lib/ui-checks.mjs';
+import { assertLegacyDatabaseRedirectView } from '../lib/regression-checks.mjs';
 
 async function ensureContextSidebarExpanded(page) {
   const expandBtn = await page.evalJSON(() => {
@@ -526,6 +527,125 @@ export async function run(t, page, cfg) {
         return `成功重定向至 ${info.href}`;
       } finally {
         await restoreSafeWorkspace(page, cfg, '01-restore-safe-ws');
+      }
+    }
+  );
+
+  await t.check(
+    'NAV-04 聚合数据库旧连接路由 /context/connections/:pgId/detail 重定向保留原 connectionId、渲染真实数据表，且返回与前进后退不丢范围',
+    async () => {
+      if (cfg.workspaceId !== KNOWN_FIXTURES.workspaceId) {
+        t.block('NAV-04 数据库旧连接跳转', '当前工作区非回归基线工作区，缺少已知 PG 连接夹具');
+        return;
+      }
+      const pgConnId = KNOWN_FIXTURES.pgSourceId;
+      const expectedTable = KNOWN_FIXTURES.pgExpectedTable;
+      const step = '01-legacy-pg-conn-redirect';
+
+      try {
+        await page.gotoContext(`/context/connections/${encodeURIComponent(pgConnId)}/detail`, {
+          stepName: step,
+          timeoutMs: 14000,
+          readyFn: () => {
+            if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
+            return /\/context\/catalog\/[^/]+\/detail/.test(window.location.pathname);
+          },
+        });
+        const settled = await waitForTerminalDom(
+          page,
+          () => {
+            if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
+            const main = document.querySelector('main, article, .console-content-wrapper-v2');
+            const text = main?.innerText || '';
+            return Boolean(
+              text.includes('public.events') ||
+                /无法加载已接入数据表|暂无已接入数据表|来源不存在/.test(text)
+            );
+          },
+          { timeoutMs: 12000 }
+        );
+        const redirectOracle = await page.collectStepOracle(step);
+        validateStepTerminalState(redirectOracle, cfg, {
+          stepLabel: 'PG 旧连接路由重定向详情',
+          forbidWrite: true,
+        });
+        if (!settled.ok) {
+          throw new Error(`PG 旧连接重定向后详情页未收敛 (${redirectOracle.href})`);
+        }
+
+        const detailSnap = await page.evalJSON(() => {
+          const root = document.querySelector('main, article, .console-content-wrapper-v2') || document.body;
+          const rows = [...root.querySelectorAll('table tbody tr')].filter(
+            tr => tr.getClientRects().length && !tr.querySelector('.arco-empty')
+          );
+          const backBtn = [...root.querySelectorAll('button, ve-button, a')].find(el =>
+            /返回知识管理|返回目录|返回资产列表|^返回$/.test((el.textContent || '').trim())
+          );
+          const r = backBtn?.getBoundingClientRect();
+          return {
+            detailHref: window.location.href,
+            text: root.innerText || '',
+            hasErrorAlert: Boolean(root.querySelector('.arco-alert-error')),
+            tableCount: rows.length,
+            backPos:
+              backBtn && r && r.width > 0 && r.height > 0
+                ? { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+                : null,
+          };
+        });
+
+        let backHref = '';
+        if (detailSnap.backPos) {
+          const backStep = '01-legacy-pg-back-catalog';
+          page.setStep(backStep);
+          await cdpClickPoint(page, detailSnap.backPos.x, detailSnap.backPos.y);
+          const backSettled = await waitForTerminalDom(
+            page,
+            () =>
+              window.location.pathname.endsWith('/context/catalog') &&
+              !document.querySelector('.spin-center, .arco-spin-loading'),
+            { timeoutMs: 10000 }
+          );
+          const backOracle = await page.collectStepOracle(backStep);
+          validateStepTerminalState(backOracle, cfg, {
+            stepLabel: 'PG 详情点击返回目录',
+            forbidWrite: true,
+          });
+          if (!backSettled.ok) {
+            throw new Error(`PG 详情点击返回后未回到目录终态 (${backOracle.href})`);
+          }
+          backHref = backOracle.href;
+
+          // 浏览器后退应恢复同一数据库资产详情及 connectionId
+          const histBackStep = '01-legacy-pg-history-back';
+          page.setStep(histBackStep);
+          await page.evalJSON(() => window.history.back());
+          const histSettled = await waitForTerminalDom(
+            page,
+            () =>
+              /\/context\/catalog\/[^/]+\/detail/.test(window.location.pathname) &&
+              !document.querySelector('.spin-center, .arco-spin-loading') &&
+              (document.body?.innerText || '').includes('public.events'),
+            { timeoutMs: 10000 }
+          );
+          const histOracle = await page.collectStepOracle(histBackStep);
+          validateStepTerminalState(histOracle, cfg, {
+            stepLabel: '浏览器后退恢复 PG 详情',
+            forbidWrite: true,
+          });
+          if (!histSettled.ok) {
+            throw new Error(`浏览器后退未恢复原 PG 详情与数据表 (${histOracle.href})`);
+          }
+        }
+
+        assertLegacyDatabaseRedirectView(
+          { ...detailSnap, backHref },
+          cfg,
+          { connectionId: pgConnId, expectedTable }
+        );
+        return `connectionId=${pgConnId} 保留，已渲染 ${detailSnap.tableCount} 张表含 ${expectedTable}`;
+      } finally {
+        await restoreSafeWorkspace(page, cfg, '01-restore-pg-ws');
       }
     }
   );

@@ -11,6 +11,7 @@ import {
   validateStepTerminalState,
   waitForTerminalDom,
 } from '../lib/ui-checks.mjs';
+import { assertReportCitationRoundTrip } from '../lib/regression-checks.mjs';
 
 async function closeAnyDrawer(page) {
   const pos = await page.evalJSON(() => {
@@ -649,6 +650,7 @@ export async function run(t, page, cfg) {
                 title,
                 kindLabel: tags[0] || '',
                 revision: tags[1] || '',
+                hasDocQuote: (card.innerText || '').length > titleRaw.length + 24,
                 hasAssetLink: Boolean(assetBtn && ar && ar.width > 0 && ar.height > 0),
                 assetPos:
                   assetBtn && ar && ar.width > 0 ? { x: ar.x + ar.width / 2, y: ar.y + ar.height / 2 } : null,
@@ -689,8 +691,10 @@ export async function run(t, page, cfg) {
           }
         }
 
-        // 点击「查看资产 ↗」验证真实跳转到 /context/catalog/:Id/detail 且保持 workspaceId 与 project
+        // 点击「查看资产 ↗」验证真实跳转到 /context/catalog/:Id/detail，且点击返回能回到同一 taskId 运行报告（非裸任务列表）
         if (firstCard?.assetPos) {
+          const reportUrlBeforeJump = await page.evalJSON(() => window.location.href);
+          const expectedTaskId = new URL(reportUrlBeforeJump).searchParams.get('taskId') || '';
           // 重新获取展开后的最新按钮坐标
           const freshPos = await page.evalJSON(() => {
             const sec = document.querySelector('#proposal-source-section');
@@ -716,7 +720,57 @@ export async function run(t, page, cfg) {
             if (!jumped.ok) {
               throw new Error(`点击「查看资产 ↗」后未成功跳转至资产详情终态 (${jumpOracle.href})`);
             }
-            return `citations=${citCount}, kind=${firstCard.kindLabel}, 跳转资产详情成功 (${jumpOracle.href})`;
+
+            if (expectedTaskId) {
+              const backBtnPos = await page.evalJSON(() => {
+                const root = document.querySelector('article, main, .console-content-wrapper-v2') || document.body;
+                const btn = [...root.querySelectorAll('button, ve-button, a')].find(el =>
+                  /返回/.test((el.textContent || '').trim()) && el.getClientRects().length && !el.closest('aside')
+                );
+                if (!btn) return null;
+                const r = btn.getBoundingClientRect();
+                return r.width > 0 && r.height > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+              });
+              if (!backBtnPos) {
+                throw new Error('从加工报告进入资产详情后缺少可见的「返回」按钮');
+              }
+              const returnStep = '05-proposal-citation-return-report';
+              page.setStep(returnStep);
+              await cdpClickPoint(page, backBtnPos.x, backBtnPos.y);
+              const reportReturned = await waitForTerminalDom(
+                page,
+                () => {
+                  if (document.querySelector('.spin-center, .arco-spin-loading')) return false;
+                  const tabs = [
+                    ...document.querySelectorAll('[role="tab"], .arco-tabs-header-title'),
+                    ...Array.from(document.querySelectorAll('ve-tabs')).flatMap(host =>
+                      [...(host.shadowRoot?.querySelectorAll('[role="tab"], [part~="tab"]') || [])]
+                    ),
+                  ].filter(el =>
+                    ['概览', '效果评估', '产物与来源', '执行日志'].includes((el.textContent || '').trim())
+                  );
+                  return tabs.length >= 4;
+                },
+                { timeoutMs: 14000 }
+              );
+              const returnOracle = await page.collectStepOracle(returnStep);
+              validateStepTerminalState(returnOracle, cfg, {
+                stepLabel: '资产详情返回原加工运行报告',
+                forbidWrite: true,
+              });
+              const expectedDomainId = isBaselineWs ? KNOWN_FIXTURES.r4Domain.domainId : targetDomainId;
+              assertReportCitationRoundTrip(
+                {
+                  detailHref: jumpOracle.href,
+                  returnedHref: returnOracle.href,
+                  reportReady: reportReturned.ok,
+                  domainId: expectedDomainId,
+                  taskId: expectedTaskId,
+                },
+                cfg
+              );
+            }
+            return `citations=${citCount}, kind=${firstCard.kindLabel}, 跳转资产详情并原路返回报告 taskId=${expectedTaskId || '—'} 成功`;
           }
         }
 
