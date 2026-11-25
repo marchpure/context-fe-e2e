@@ -469,16 +469,20 @@ export async function run(t, page, cfg) {
       }
     }
 
-    // 测 AssetTable 类型下拉筛选：文档 -> 数据表 -> 清空全部
-    for (const [typeValue, uiOptionLabel, expectedColText] of [
-      ['FileCollection', '文档', '文档'],
-      ['Table', '数据表', '数据表'],
+    for (const [typeValue, uiOptionLabel] of [
+      ['FileCollection', '文档'],
+      ['Table', '数据表'],
+      ['AppSchema', '应用字典'],
+      ['CodeRepo', '代码仓'],
     ]) {
+      const filterStep = `${step}-${typeValue}`;
+      page.setStep(filterStep);
       await dispatchRealMouseClick(
         page,
         `(() => {
           const selects = Array.from(document.querySelectorAll('main .arco-select'));
-          return selects.find(s => /全部类型|文档|数据表|代码仓|应用字典/.test((s.innerText || '').trim())) || null;
+          return selects.find(s => s.querySelector('input[placeholder="全部类型"]') ||
+            /^(全部类型|文档|数据表|代码仓|应用字典)$/.test((s.innerText || '').trim())) || null;
         })()`,
         '资产类型筛选下拉框'
       );
@@ -501,15 +505,28 @@ export async function run(t, page, cfg) {
         throw new Error(`筛选资产类型「${uiOptionLabel}」失败: ${filtered.verdict?.reason}`);
       }
       const wrongTypeRow = (filtered.snapshot.assetRows || []).find(
-        r => r.typeLabel !== expectedColText
+        r => r.typeLabel !== uiOptionLabel
       );
       if (wrongTypeRow) {
         throw new Error(
           `筛选「${uiOptionLabel}」时出现异类资产「${wrongTypeRow.name}」(类型=${wrongTypeRow.typeLabel})`
         );
       }
+      const filterOracle = await page.collectStepOracle(filterStep);
+      assertStepOracleHealthy(filterOracle);
+      const reads = filterOracle.records.filter(record => record.action === 'ListContextEntries');
+      checkCatalogWirePages(reads);
+      if (['CodeRepo', 'AppSchema'].includes(typeValue)) {
+        if (reads.length !== 1) {
+          throw new Error(`筛选「${uiOptionLabel}」首批应只读取一页，实际 ${reads.length} 次`);
+        }
+        if (!Number.isFinite(reads[0].durationMs) || reads[0].durationMs > cfg.slo.standardApiMaxMs) {
+          throw new Error(`筛选「${uiOptionLabel}」读取 ${reads[0].durationMs}ms 超红线`);
+        }
+      }
     }
 
+    page.setStep(step);
     // 点击「清空全部」恢复无筛选列表
     await dispatchRealMouseClick(
       page,
@@ -527,7 +544,7 @@ export async function run(t, page, cfg) {
 
     const oracle = await page.collectStepOracle(step);
     assertStepOracleHealthy(oracle);
-    return `四类来源目录与文档/数据表类型筛选核验通过，恢复后资产行=${restored.verdict.assetRowCount}`;
+    return `四类来源目录与文档／数据表／应用字典／代码仓筛选核验通过，恢复后资产行=${restored.verdict.assetRowCount}`;
   });
 
   // -------------------------------------------------------------------------

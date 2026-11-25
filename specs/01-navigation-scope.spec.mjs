@@ -578,9 +578,11 @@ export async function run(t, page, cfg) {
           const rows = [...root.querySelectorAll('table tbody tr')].filter(
             tr => tr.getClientRects().length && !tr.querySelector('.arco-empty')
           );
-          const backBtn = [...root.querySelectorAll('button, ve-button, a')].find(el =>
-            /返回知识管理|返回目录|返回资产列表|^返回$/.test((el.textContent || '').trim())
-          );
+          const backBtn = [...root.querySelectorAll('button, ve-button, a')].find(el => {
+            const label = el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '';
+            return el.getClientRects().length &&
+              /^(返回资源列表|返回知识管理|返回目录|返回资产列表|返回)$/.test(label.trim());
+          });
           const r = backBtn?.getBoundingClientRect();
           return {
             detailHref: window.location.href,
@@ -594,6 +596,7 @@ export async function run(t, page, cfg) {
           };
         });
 
+        if (!detailSnap.backPos) throw new Error('PG 详情缺少可操作的返回资源列表按钮');
         let backHref = '';
         if (detailSnap.backPos) {
           const backStep = '01-legacy-pg-back-catalog';
