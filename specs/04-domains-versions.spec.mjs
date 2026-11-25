@@ -76,7 +76,7 @@ export async function readVersionDrawerSnapshot(page, versionStr, refundEntryId)
       if (!drawer) return false;
       if (drawer.querySelector('.arco-spin-loading')) return false;
       const title = (drawer.querySelector('.arco-drawer-header')?.innerText || '').trim();
-      if (!title.includes(${JSON.stringify(`版本 ${versionStr}`)}) || !title.includes('发布范围')) return false;
+      if (!title.includes(${JSON.stringify(`版本 ${versionStr}`)}) || !title.includes('发布详情')) return false;
       const r = drawer.getBoundingClientRect();
       if (!(r.width >= 360 && r.height >= 200)) return false;
       const rows = [...drawer.querySelectorAll('table tbody tr')].filter(
@@ -96,7 +96,7 @@ export async function readVersionDrawerSnapshot(page, versionStr, refundEntryId)
 
   if (!opened.ok || !opened.value) {
     await closeOpenDrawer(page);
-    throw new Error(`点击版本「${versionStr}」后未成功打开「发布范围」抽屉`);
+    throw new Error(`点击版本「${versionStr}」后未成功打开「发布详情」抽屉`);
   }
 
   const snap = opened.value;

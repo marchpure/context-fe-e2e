@@ -68,10 +68,22 @@ async function readMcpTableState(page) {
       .filter(tr => tr.cells.length === headers.length)
       .map(tr => {
         const r = tr.getBoundingClientRect();
-        const tds = [...tr.querySelectorAll('td')].map(td => (td.innerText || '').trim());
-        const metricsBtn = [...tr.querySelectorAll('td button, td ve-button, td a')].find(
-          el => (el.textContent || '').trim() === '查看'
+        const cells = [...tr.cells];
+        const contents = cells.map(cell =>
+          [...cell.querySelectorAll('slot')].flatMap(slot => slot.assignedElements({ flatten: true }))
         );
+        const tds = cells.map((cell, index) =>
+          (contents[index].length
+            ? contents[index].map(node => node.textContent || '').join(' ')
+            : cell.innerText || '').trim()
+        );
+        const metricsIndex = headers.findIndex(header => header.label === '调用统计');
+        const metricsContent = metricsIndex < 0 ? [] : contents[metricsIndex];
+        const metricsBtn = metricsContent
+          .flatMap(node => node.matches('button, ve-button, a')
+            ? [node]
+            : [...node.querySelectorAll('button, ve-button, a')])
+          .find(el => (el.textContent || '').trim() === '查看');
         const mr = metricsBtn?.getBoundingClientRect();
         return {
           width: Math.round(r.width),
