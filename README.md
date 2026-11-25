@@ -1,50 +1,44 @@
-# AgentKit Context 前端固化验证与增量维护规约（试运行固定基地）
+# AgentKit Context 固定回归
 
-本目录（`/Users/bytedance/claude-work/context-fe-e2e/`）是 AgentKit Context 前后端全链路验证的**跨 Worktree 唯一固定承载库**。在正式并入 `cloud-fe/agentkit-monorepo/apps/agentkit-platform/e2e/` Codebase MR CI 之前，所有 Context 新需求开发与 Bug 修复均在此处维护增量用例并跑全量回归。
+按 [用户旅程验收矩阵](SPEC_MATRIX.md) 维护用例。默认读取合成测试工作区，使用独立浏览器标签页。真实交互以主操作区的业务终态为准，同时采集工作区、项目、请求 ID、业务错误码与耗时。
 
----
-
-## 一、核心运行机制（为什么快且稳）
-
-1. **单标签页隔离直连 `9223`（零弹窗、零挂起、不碰已有标签页）**：
-   - 执行器通过 `PUT http://127.0.0.1:9223/json/new` 单独拉起 1 个测试标签页，Node v22 原生 `WebSocket` 直连该标签页，绕开多标签页 `connectOverCDP` 卡死问题；跑完在 `finally` 自动关闭该临时标签页。
-2. **协议层自动注入灰度头与泳道头**：
-   - 自动注入 `x-forward-fe: deploy_context_stg_7399178560` 与 `x-lane-env: 7399178560`（可通过环境变量 `FE_GRAY_HEADER` / `LANE_ENV` 覆盖，比如切本地 `CONTEXT_CONSOLE_BASE=http://localhost:8080/agentkit-stg/region:agentkit-stg+cn-beijing/v2` 验证未部署本地前端改动！）。
-3. **全局自动探针（`lib/cdpSession.mjs` Oracle）**：
-   - **100% 自动采集每条 `/context/control/*` 与 `/context/data/*` 请求的耗时 `ms`、`ResponseMetadata.RequestId` 与错误码**（脱敏不落盘正文）；
-   - 自动拦截五大退化：`Uncaught Error` 崩溃、`workspaceId` 丢失或串到禁区空间、`1970-01-01` 零值时间、重复请求风暴、单接口超耗时红线。
-4. **已知开放缺陷分流（`lib/knownIssues.mjs`）**：
-   - 已登记未修复的 Bug（如 `CTX-001`）跑出预期症状时标为 `KNOWN_BUG`，不中断后续模块；
-   - 一旦某次修复部署后该断言通过，自动高亮 `FIXED_CANDIDATE`，此时将其从 `knownIssues.mjs` 删除并把 `t.checkKnownBug` 改为 `t.check`，即永久锁死为硬回归门禁！
-   - 任何未登记的新失败直接标为 `REGRESSION_FAIL`（退出码 `1`）。
-
----
-
-## 二、日常命令速查
+## 运行
 
 ```bash
-# 1. 跑全量 7 大模块固化用例（约 25~45 秒跑完，生成 reports/latest-report.md）
-/Users/bytedance/claude-work/context-fe-e2e/run-e2e.sh
-
-# 2. 只跑单个指定模块（例如只测 MCP 服务页或资产目录）
-/Users/bytedance/claude-work/context-fe-e2e/run-e2e.sh 06-mcp
-/Users/bytedance/claude-work/context-fe-e2e/run-e2e.sh 02-catalog
-
-# 3. 指向本地正在启动的 edenx dev 服务验证未提交前端代码
-CONTEXT_CONSOLE_BASE="https://localhost:8080/agentkit-stg/region:agentkit-stg+cn-beijing/v2" \
-  /Users/bytedance/claude-work/context-fe-e2e/run-e2e.sh
+# Node 22+，本机隔离 Chrome CDP 默认监听 127.0.0.1:9223
+./run-e2e.sh
+./run-e2e.sh 02-catalog
+node --test test/*.test.mjs
 ```
 
----
+隔离浏览器需事先登录已授权的测试租户。若端口、账号或合成夹具不可用，报告记为 `BLOCKED`。可设置 `CONTEXT_E2E_REPORT_DIR` 将本次报告写入独立目录。默认写入 `reports/latest-report.md`。报告记录尝试但未完成的请求，HTTP 200 的业务错误单独列示。
 
-## 三、每次跑新需求 / 修 Bug 的强制维护流程（四步法）
+| 退出码 | 含义 |
+|---|---|
+| 0 | 已运行用例无新增失败或阻断，仍需查看已知缺陷和修复候选 |
+| 1 | 有回归失败 |
+| 2 | 有验证阻断或套件无法运行 |
 
-1. **开发前看基线**：查阅 `SPEC_MATRIX.md` 了解所属模块已有断言与性能红线。
-2. **开发中补增量用例**：
-   - 新增前端功能 → 在对应 `specs/0X-*.spec.mjs` 补充一条 `await t.check('新功能断言名称', ...)`；
-   - 修复已有 `CTX-*` 缺陷 → 将对应 `t.checkKnownBug('CTX-xxx', ...)` 升级为硬门禁 `t.check(...)`，并从 `lib/knownIssues.mjs` 删除该编号；
-   - 修复新发现的野生 Bug → 先补一条必现该 Bug 的 `t.check(...)` 断言确认能抓红，再修业务代码跑绿。
-3. **提 MR / 部署验收后跑全量回归**：
-   - 执行 `/Users/bytedance/claude-work/context-fe-e2e/run-e2e.sh`（不带过滤参数，跑全量 7 模块）；
-   - 硬门禁标准：**`REGRESSION_FAIL == 0`**，且新增/修复项为 **`PASS`**，接口耗时无新增超红线项。
-4. **提交用例变更**：在本目录执行 `git add -A && git commit -m "test(e2e): ..."` 留存用例演进历史，并同步更新 `SPEC_MATRIX.md`。
+## 环境
+
+默认目标 STG 工作区 `800e2e0a-bb05-4591-8cd2-f8df54be0ebe`、项目 `default`、前端小流量 `deploy_context_stg_7399178560`、后端泳道 `7399178560`。隔离环境参数为 `CONTEXT_CONSOLE_BASE`、`CONTEXT_WORKSPACE_ID`、`CONTEXT_PROJECT_NAME`、`FE_GRAY_HEADER`、`LANE_ENV`、`CDP_HTTP_BASE`。浏览器端口限本机。
+
+需要提交问答、创建对象、扫描、审核、发布或删除的用例使用受控合成对象。执行前确认样本与清理边界。每条用例保留实际通过、失败、待执行或缺前置条件的状态。
+
+## 草稿调试的实际问答
+
+`08-draft-debug` 可按默认只读配置检查草稿入口和跳转。以下参数齐备时，脚本才会在指定合成领域中提交一次「你有哪些数据」。准备一个带未发布草稿、已绑定可读合成资产的领域，使用该草稿资产在界面里的准确名称。
+
+```bash
+CONTEXT_E2E_RUN_DRAFT_QUERY=1 \
+CONTEXT_E2E_DRAFT_DOMAIN_ID='<合成领域 ID>' \
+CONTEXT_E2E_DRAFT_DOMAIN_NAME='<codex-e2e- 开头的领域名>' \
+CONTEXT_E2E_DRAFT_EXPECTED_ASSET='<草稿绑定的合成资产名>' \
+./run-e2e.sh 08-draft-debug
+```
+
+等待新助手回答的总预算上限为 120 秒。仅进入调试页、收到用户消息回显或看到模型仍在生成均无法通过问答断言。按默认只读配置运行时，问答步骤显示为 `BLOCKED`，其余模块继续执行。
+
+## 维护
+
+新增入口与状态都应有用户动作和结果断言。对修复项先捕获可识别的失败信号，再用同一入口复验。已知缺陷的具体症状才允许记为 `KNOWN_BUG`；缺夹具、账号错误、错工作区或其他报错需要按实际状态登记。修复复验完成后，将对应断言转为常规回归，并同步更新矩阵及 `lib/knownIssues.mjs`。
