@@ -23,14 +23,14 @@ function paginationState() {
   };
 }
 
-async function observePage(page, cfg, step, started, pageNumber) {
+async function observePage(page, cfg, step, started, pageNumber, budgetOptions) {
   const result = await page.waitFor(`(() => {
     const state = (${paginationState.toString()})();
     return state?.current === ${JSON.stringify(`第 ${pageNumber} 页`)} && state.rows.length ? state : false;
   })()`, { timeoutMs: Math.max(1, 5000 - (Date.now() - started)) });
   const elapsed = Date.now() - started;
   const oracle = await page.collectStepOracle(step);
-  const evidence = assertCatalogReadBudget(oracle, cfg, elapsed);
+  const evidence = assertCatalogReadBudget(oracle, cfg, elapsed, budgetOptions);
   if (!result.ok) throw new Error(`第 ${pageNumber} 页未到可操作终态`);
   const records = oracle.records.filter(record => record.action === 'ListContextEntries');
   for (const record of records) assertListEntriesPage(record, { pageSize: 10, entryType: 'DATA_ASSET' });
@@ -84,7 +84,9 @@ export async function run(t, page, cfg) {
     await dispatchRealMouseClick(page, `Array.from(document.querySelectorAll(
       'nav[aria-label="资产列表分页"] button:not([disabled])'
     )).find(button => button.textContent.trim() === '上一页')`, '上一页');
-    const backToFirst = await observePage(page, cfg, prevStep, prevStarted, 1);
+    const backToFirst = await observePage(page, cfg, prevStep, prevStarted, 1, {
+      cachedPageAllowed: true,
+    });
     assertScopedRoute(backToFirst.oracle.href, cfg, '/context/catalog', { assetType: 'Table' });
     if (JSON.stringify(backToFirst.rows) !== JSON.stringify(first.rows)) {
       throw new Error('点击「上一页」返回第 1 页后展示的资产行集与首屏不一致');

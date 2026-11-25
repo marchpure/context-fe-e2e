@@ -47,6 +47,12 @@ test('CAT-01/02 性能门禁覆盖每次目录读请求、边界值、挂起与�
   });
   const request = { action: 'ListContextEntries', httpStatus: 200, durationMs: 1500, requestId: 'req-limit' };
   assert.equal(assertCatalogReadBudget({ href: href('/context/catalog').href, records: [request] }, cfg, 5000), '1500ms/req-limit');
+  const cached = { href: href('/context/catalog').href, records: [] };
+  assert.throws(() => assertCatalogReadBudget(cached, cfg, 50));
+  assert.match(assertCatalogReadBudget(cached, cfg, 50, { cachedPageAllowed: true }), /已读页面/);
+  assert.throws(() => assertCatalogReadBudget({
+    ...cached, records: [{ ...request, durationMs: 1501 }],
+  }, cfg, 2000, { cachedPageAllowed: true }), /1500ms/);
 });
 
 test('NAV-03 所属领域编辑 URL 和返回目标保留特殊字符项目，拒绝重复、缺失或跨域', () => {
