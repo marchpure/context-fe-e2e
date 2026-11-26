@@ -162,12 +162,37 @@ async function scrapeEvaluationTabView(page) {
 
 export async function run(t, page, cfg) {
   const isBaselineWs = cfg.workspaceId === KNOWN_FIXTURES.workspaceId;
-  const targetDomainId = isBaselineWs ? KNOWN_FIXTURES.r4Domain.domainId : cfg.baselineDomainId;
+  let targetDomainId = isBaselineWs ? KNOWN_FIXTURES.r4Domain.domainId : cfg.baselineDomainId;
+  if (!targetDomainId) {
+    await page.gotoContext('/context/domains', { stepName: '05-discover-domain', timeoutMs: 14000 });
+    await waitForTerminalDom(page, () => !document.querySelector('.spin-center, .arco-spin-loading'), {
+      timeoutMs: 8000,
+    });
+    targetDomainId = await page.evalJSON(() => {
+      const cardsWrap = document.querySelector('[class*="cards"]');
+      const cards = cardsWrap ? [...cardsWrap.children] : [];
+      const parsed = cards
+        .map(card => {
+          const txt = (card.innerText || '').trim();
+          const m = txt.match(/\bdom-[a-z0-9_-]+/i);
+          return m ? { id: m[0], synthetic: /codex-e2e-/i.test(txt) } : null;
+        })
+        .filter(Boolean);
+      return (parsed.find(item => item.synthetic) || parsed[0])?.id || '';
+    });
+  }
   let openedReportActive = false;
 
   await t.check(
     '知识加工记录页终态加载并真实点击进入有合成建议产物的运行报告',
     async () => {
+      if (!targetDomainId) {
+        t.block(
+          '知识加工记录页终态加载并真实点击进入有合成建议产物的运行报告',
+          `当前工作区 (${cfg.workspaceId}) 暂无业务领域且未配置 CONTEXT_BASELINE_DOMAIN_ID`
+        );
+        return;
+      }
       const step = '05-processing-hub-and-open-report';
       const procPath = `/context/domains/${encodeURIComponent(targetDomainId)}/processing`;
       const nav = await page.gotoContext(procPath, {

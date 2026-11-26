@@ -33,7 +33,9 @@ async function main() {
   const allResults = [];
 
   console.log(`=== AgentKit Context 前端固化验证套件启动 (${specFiles.length} 个模块文件) ===`);
-  console.log(`目标工作区: ${DEFAULT_CONFIG.workspaceId} | 灰度头: ${DEFAULT_CONFIG.feGrayHeader} | 泳道: ${DEFAULT_CONFIG.laneEnv}`);
+  console.log(
+    `目标租户: ${DEFAULT_CONFIG.accountId || '当前浏览器会话'} | 目标工作区: ${DEFAULT_CONFIG.workspaceId} | 灰度头: ${DEFAULT_CONFIG.feGrayHeader} | 泳道: ${DEFAULT_CONFIG.laneEnv}`
+  );
 
   try {
     try {
@@ -117,7 +119,7 @@ async function main() {
     '',
     `- **执行时间**：${new Date().toISOString()}`,
     `- **总墙钟耗时**：${(totalWallMs / 1000).toFixed(1)}s`,
-    `- **测试工作区**：\`${DEFAULT_CONFIG.workspaceId}\`（前端灰度 \`${DEFAULT_CONFIG.feGrayHeader}\` / 后端泳道 \`${DEFAULT_CONFIG.laneEnv}\`）`,
+    `- **目标租户 / 工作区**：\`${DEFAULT_CONFIG.accountId || 'session-default'}\` / \`${DEFAULT_CONFIG.workspaceId}\`（前端灰度 \`${DEFAULT_CONFIG.feGrayHeader}\` / 后端泳道 \`${DEFAULT_CONFIG.laneEnv}\`）`,
     `- **浏览器实际静态资源版本**：${[...page.frontendVersions].join('、') || '未取得'}`,
     `- **统计汇总**：PASS **${counts.PASS}** | 新修复转正候选 (FIXED_CANDIDATE) **${counts.FIXED_CANDIDATE}** | 已知未修缺陷 (KNOWN_BUG) **${counts.KNOWN_BUG}** | 新增回归失败 (REGRESSION_FAIL) **${counts.REGRESSION_FAIL}** | 未完成验证 (BLOCKED) **${counts.BLOCKED}**`,
     '',

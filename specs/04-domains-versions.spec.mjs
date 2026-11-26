@@ -334,15 +334,26 @@ export async function run(t, page, cfg) {
     }
   );
 
+  const discoveredDomainId =
+    listedDomains.find(d => d.domainId && /codex-e2e-/i.test(d.textSample))?.domainId ||
+    listedDomains.find(d => d.domainId)?.domainId ||
+    '';
   const primaryDomainId =
     cfg.workspaceId === KNOWN_FIXTURES.workspaceId
       ? KNOWN_FIXTURES.r4Domain.domainId
-      : cfg.baselineDomainId;
+      : cfg.baselineDomainId || discoveredDomainId;
 
   let detailLoadedOk = false;
   await t.check(
     '业务领域详情页五页签顺序尺寸正确且终态无持续 loading',
     async () => {
+      if (!primaryDomainId) {
+        t.block(
+          '业务领域详情页五页签顺序尺寸正确且终态无持续 loading',
+          `当前工作区 (${cfg.workspaceId}) 暂无业务领域且未配置 CONTEXT_BASELINE_DOMAIN_ID`
+        );
+        return;
+      }
       const step = '04-domain-detail';
       const nav = await page.gotoContext(
         `/context/domains/${encodeURIComponent(primaryDomainId)}/detail`,
@@ -611,7 +622,16 @@ export async function run(t, page, cfg) {
     '首次发布弹窗首步不展示当前未生效的冗余网关/服务名/认证可编辑项且取消零写请求',
     async () => {
       const candidateId =
-        listedDomains.find(d => d.unpublished && d.domainId)?.domainId || cfg.baselineDomainId;
+        listedDomains.find(d => d.unpublished && d.domainId)?.domainId ||
+        cfg.baselineDomainId ||
+        discoveredDomainId;
+      if (!candidateId) {
+        t.block(
+          '首次发布弹窗首步不展示当前未生效的冗余网关/服务名/认证可编辑项且取消零写请求',
+          `当前工作区 (${cfg.workspaceId}) 暂无未发布候选业务领域`
+        );
+        return;
+      }
       const step = '04-publish-modal-first-step';
 
       try {

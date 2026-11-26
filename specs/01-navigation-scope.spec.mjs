@@ -157,14 +157,43 @@ async function clickSidebarSafely(page, cfg, label, stepName, readyPredicate, re
 }
 
 export async function run(t, page, cfg) {
-  const coldDomainId =
+  let coldDomainId =
     cfg.workspaceId === KNOWN_FIXTURES.workspaceId
       ? KNOWN_FIXTURES.r4Domain.domainId
       : cfg.baselineDomainId;
 
+  if (!coldDomainId) {
+    await page.gotoContext('/context/domains', {
+      stepName: '01-discover-domain-for-cold-nav',
+      timeoutMs: 14000,
+    });
+    await waitForTerminalDom(page, () => !document.querySelector('.spin-center, .arco-spin-loading'), {
+      timeoutMs: 8000,
+    });
+    coldDomainId = await page.evalJSON(() => {
+      const cardsWrap = document.querySelector('[class*="cards"]');
+      const cards = cardsWrap ? [...cardsWrap.children] : [];
+      const parsed = cards
+        .map(card => {
+          const txt = (card.innerText || '').trim();
+          const m = txt.match(/\bdom-[a-z0-9_-]+/i);
+          return m ? { id: m[0], synthetic: /codex-e2e-/i.test(txt) } : null;
+        })
+        .filter(Boolean);
+      return (parsed.find(item => item.synthetic) || parsed[0])?.id || '';
+    });
+  }
+
   await t.check(
     '冷启动深链进入领域详情后侧栏顺序尺寸有效，真实点击侧栏「工作台」保持 workspaceId 与 project（防冷启动串空间）',
     async () => {
+      if (!coldDomainId) {
+        t.block(
+          '冷启动深链进入领域详情后侧栏顺序尺寸有效，真实点击侧栏「工作台」保持 workspaceId 与 project',
+          `当前工作区 (${cfg.workspaceId}) 暂无业务领域且未配置 CONTEXT_BASELINE_DOMAIN_ID（空白工作区在热态侧栏与模块 13 覆盖）`
+        );
+        return;
+      }
       const coldStep = '01-cold-domain-detail';
       const coldNav = await page.gotoContext(
         `/context/domains/${encodeURIComponent(coldDomainId)}/detail`,
@@ -457,6 +486,13 @@ export async function run(t, page, cfg) {
         cfg.workspaceId === KNOWN_FIXTURES.workspaceId
           ? KNOWN_FIXTURES.r4Domain.localKbConnId
           : cfg.baselineLocalKbConnId;
+      if (!targetConnId) {
+        t.block(
+          'CTX-006 旧连接路由重定向资产详情',
+          `当前工作区 (${cfg.workspaceId}) 未配置 CONTEXT_BASELINE_LOCAL_KB_CONN_ID，跳过旧连接 ID 深链重定向检查`
+        );
+        return;
+      }
       const step = '01-legacy-conn-redirect';
 
       try {

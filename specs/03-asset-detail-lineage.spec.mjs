@@ -45,14 +45,42 @@ async function openUnitRowFullDetail(page, rowName) {
 }
 
 export async function run(t, page, cfg) {
-  const detailPath = `/context/catalog/${encodeURIComponent(cfg.baselineDocEntryId)}/detail`;
+  let targetDocEntryId = cfg.baselineDocEntryId;
+  if (!targetDocEntryId) {
+    await page.gotoContext('/context/catalog?assetType=FileCollection', {
+      stepName: '03-discover-doc-entry',
+    });
+    const discovered = await waitForCatalogSettled(
+      page,
+      { mode: 'all', expectedAssetType: 'FileCollection' },
+      { timeoutMs: 16000 }
+    );
+    if (discovered.ok && discovered.verdict.status === 'READY') {
+      targetDocEntryId = await page.evalJSON(() => {
+        const rows = [...document.querySelectorAll('main tbody tr[data-row-key]')];
+        const synth = rows.find(tr => /codex-e2e-/i.test(tr.innerText || ''));
+        return (synth || rows[0])?.getAttribute('data-row-key') || '';
+      });
+    }
+  }
+  const detailPath = targetDocEntryId
+    ? `/context/catalog/${encodeURIComponent(targetDocEntryId)}/detail`
+    : '';
   let baselineDetailSnap = null;
-  let baselineNotFound = false;
+  let baselineNotFound = !targetDocEntryId;
 
   // -------------------------------------------------------------------------
   // 1. 基准文档详情页：严禁凭静态页签报 PASS，必须退出 Spinner 并渲染真实标题与正文/片段
   // -------------------------------------------------------------------------
   await t.check('基准 Markdown 文档资产详情页退出 Spinner，展示真实标题、索引状态与正文预览且保持 workspaceId', async () => {
+    if (!detailPath) {
+      baselineNotFound = true;
+      t.block(
+        '基准 Markdown 文档资产详情页核验',
+        `当前工作区 (${cfg.workspaceId}) 暂无已入库文档资产且未配置 CONTEXT_BASELINE_DOC_ENTRY_ID`
+      );
+      return;
+    }
     const step = '03-baseline-doc-detail';
     const navStart = Date.now();
     await page.gotoContext(detailPath, {
